@@ -2,7 +2,22 @@ import re
 from pathlib import Path
 
 import pandas as pd
-from typing import List, Dict, Optional
+
+def _obo_row(term):
+	row = {}
+	for key in ["id", "name", "namespace", "def", "synonym", "is_a"]:
+		value = term.get(key)
+		if value is None:
+			row[key] = ""
+		elif isinstance(value, list):
+			row[key] = "|".join(value)
+		else:
+			row[key] = value
+	return row
+
+def _append_obo_term(terms, term):
+	if term:
+		terms.append(_obo_row(term))
 
 def read_obo_file(path):
 	wanted_keys = {"id", "name", "namespace", "def", "synonym", "is_a"}
@@ -14,53 +29,38 @@ def read_obo_file(path):
 	rx_is_a = re.compile(r'^is_a:\s*(\S+)')
 	rx_kv = re.compile(r'^(\w+):\s*(.*)$')
 
-	def flush_current():
-		nonlocal term, terms
-		if term:
-			# Normaliser en str + jointures
-			row = {}
-			for k in ["id", "name", "namespace", "def", "synonym", "is_a"]:
-				v = term.get(k)
-				if v is None:
-					row[k] = ""
-				elif isinstance(v, list):
-					row[k] = "|".join(v)
-				else:
-					row[k] = v
-			terms.append(row)
-			term = {}
-
 	with open(path, "r", encoding = "utf-8") as f:
 		for raw in f:
 			line = raw.rstrip("\n")
 
 			if line.strip() == "[Term]":
-				flush_current()
+				_append_obo_term(terms, term)
+				term = {}
 				continue
 
 			if not line.strip():
 				continue
 
-			m = rx_def.match(line)
-			if m:
-				term["def"] = m.group(1)
+			match = rx_def.match(line)
+			if match:
+				term["def"] = match.group(1)
 				continue
 
-			m = rx_syn.match(line)
-			if m:
+			match = rx_syn.match(line)
+			if match:
 				term.setdefault("synonym", [])
-				term["synonym"].append(m.group(1))
+				term["synonym"].append(match.group(1))
 				continue
 
-			m = rx_is_a.match(line)
-			if m:
+			match = rx_is_a.match(line)
+			if match:
 				term.setdefault("is_a", [])
-				term["is_a"].append(m.group(1))
+				term["is_a"].append(match.group(1))
 				continue
 
-			m = rx_kv.match(line)
-			if m:
-				key, value = m.group(1), m.group(2)
+			match = rx_kv.match(line)
+			if match:
+				key, value = match.group(1), match.group(2)
 				if key in wanted_keys:
 					if key in ("synonym", "is_a"):
 						term.setdefault(key, [])
@@ -68,10 +68,23 @@ def read_obo_file(path):
 					else:
 						term[key] = value
 
-		flush_current()
+	_append_obo_term(terms, term)
 
 	df = pd.DataFrame(terms, columns = ["id", "name", "namespace", "def", "synonym", "is_a"])
 	return df
+
+def _normalized_sequence(chunks):
+	sequence = "".join(chunks).replace(" ", "").replace("\n", "").upper()
+	return re.sub(r"[^A-Z]", "", sequence)
+
+def _append_fasta_record(records, current, seq_chunks):
+	if current is None:
+		return
+	sequence = _normalized_sequence(seq_chunks)
+	record = current.copy()
+	record["sequence"] = sequence if sequence else None
+	record["length"] = len(sequence) if sequence else 0
+	records.append(record)
 
 def read_fasta_file(file_path):
 	file_path = Path(file_path)
@@ -81,11 +94,11 @@ def read_fasta_file(file_path):
 
 	header_re = re.compile(r"""
         ^
-        >(?P<db>[^|]+)\|                # sp or tr
+        >(?P<db>[^|]+)\|
         (?P<accession>[^|]+)\|
-        (?P<entry_name>\S+)             # e.g., RHG10_HUMAN
+        (?P<entry_name>\S+)
         \s*
-        (?P<rest>.*)                    # rest of the header line
+        (?P<rest>.*)
         $
     """, re.VERBOSE)
 
@@ -99,19 +112,6 @@ def read_fasta_file(file_path):
 	current = None
 	seq_chunks = []
 
-	def flush_current():
-		nonlocal current, seq_chunks
-		if current is None:
-			return
-		sequence = "".join(seq_chunks).replace(" ", "").replace("\n", "").upper()
-		sequence = re.sub(r"[^A-Z]", "", sequence)
-		rec = current.copy()
-		rec["sequence"] = sequence if sequence else None
-		rec["length"] = len(sequence) if sequence else 0
-		records.append(rec)
-		current = None
-		seq_chunks = []
-
 	with file_path.open("r", encoding = "utf-8", errors = "replace") as fh:
 		for raw_line in fh:
 			line = raw_line.rstrip("\n")
@@ -120,10 +120,12 @@ def read_fasta_file(file_path):
 				continue
 
 			if line.startswith(">"):
-				flush_current()
+				_append_fasta_record(records, current, seq_chunks)
+				current = None
+				seq_chunks = []
 
-				m = header_re.match(line)
-				if not m:
+				match = header_re.match(line)
+				if not match:
 					header_body = line[1:].strip()
 					current = {
 						"db": None,
@@ -138,10 +140,10 @@ def read_fasta_file(file_path):
 					}
 					continue
 
-				db = m.group("db")
-				accession = m.group("accession")
-				entry_name = m.group("entry_name")
-				rest = m.group("rest").strip()
+				db = match.group("db")
+				accession = match.group("accession")
+				entry_name = match.group("entry_name")
+				rest = match.group("rest").strip()
 
 				protein_name = None
 				os = ox = gn = pe = sv = None
@@ -186,7 +188,7 @@ def read_fasta_file(file_path):
 					continue
 				seq_chunks.append(line.strip())
 
-	flush_current()
+	_append_fasta_record(records, current, seq_chunks)
 
 	df = pd.DataFrame.from_records(records, columns = [
 		"db", "accession", "entry_name", "protein_name",
@@ -212,9 +214,7 @@ def read_ia_file(path):
 	return df
 
 def train_model(go_basic, train_fasta, train_taxonomy, train_terms, ia):
-	# TODO
 	pass
 
 def produce_test_result(test_fasta, test_taxonomy, ia):
-	# TODO
 	pass
