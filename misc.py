@@ -202,3 +202,8 @@ def read_taxonomy(path):
 def read_terms(path):
 	df = pd.read_csv(path, sep = '\t', header = 0, names = ["EntryID", "term", "aspect"], usecols = [0, 1])
 	return df
+
+def read_taxons_list(path):
+	df = pd.read_csv(path, sep = '\t', header = 0, names = ["ID", "Species"], usecols = [0, 1])
+	return df
+
