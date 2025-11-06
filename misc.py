@@ -1,4 +1,6 @@
 import re
+from pathlib import Path
+
 import pandas as pd
 from typing import List, Dict, Optional
 
@@ -69,4 +71,126 @@ def read_obo_file(path):
 		flush_current()
 
 	df = pd.DataFrame(terms, columns = ["id", "name", "namespace", "def", "synonym", "is_a"])
+	return df
+
+def read_fasta_file(file_path):
+	file_path = Path(file_path)
+
+	if not file_path.exists():
+		raise FileNotFoundError(f"FASTA not found: {file_path}")
+
+	header_re = re.compile(r"""
+        ^
+        >(?P<db>[^|]+)\|                # sp or tr
+        (?P<accession>[^|]+)\|
+        (?P<entry_name>\S+)             # e.g., RHG10_HUMAN
+        \s*
+        (?P<rest>.*)                    # rest of the header line
+        $
+    """, re.VERBOSE)
+
+	kv_re = re.compile(r"""
+        (?P<key>[A-Z]{2,})=
+        (?P<val>.*?)
+        (?=(?:\s[A-Z]{2,}=)|$)
+    """, re.VERBOSE)
+
+	records = []
+	current = None
+	seq_chunks = []
+
+	def flush_current():
+		nonlocal current, seq_chunks
+		if current is None:
+			return
+		sequence = "".join(seq_chunks).replace(" ", "").replace("\n", "").upper()
+		sequence = re.sub(r"[^A-Z]", "", sequence)
+		rec = current.copy()
+		rec["sequence"] = sequence if sequence else None
+		rec["length"] = len(sequence) if sequence else 0
+		records.append(rec)
+		current = None
+		seq_chunks = []
+
+	with file_path.open("r", encoding = "utf-8", errors = "replace") as fh:
+		for raw_line in fh:
+			line = raw_line.rstrip("\n")
+
+			if not line:
+				continue
+
+			if line.startswith(">"):
+				flush_current()
+
+				m = header_re.match(line)
+				if not m:
+					header_body = line[1:].strip()
+					current = {
+						"db": None,
+						"accession": None,
+						"entry_name": None,
+						"protein_name": header_body,
+						"os": None,
+						"ox": None,
+						"gn": None,
+						"pe": None,
+						"sv": None,
+					}
+					continue
+
+				db = m.group("db")
+				accession = m.group("accession")
+				entry_name = m.group("entry_name")
+				rest = m.group("rest").strip()
+
+				protein_name = None
+				os = ox = gn = pe = sv = None
+
+				if rest:
+					first_kv = re.search(r"\b[A-Z]{2,}=", rest)
+					if first_kv:
+						protein_name = rest[: first_kv.start()].strip() or None
+						kv_part = rest[first_kv.start():]
+					else:
+						protein_name = rest or None
+						kv_part = ""
+
+					if kv_part:
+						for km in kv_re.finditer(kv_part):
+							key = km.group("key")
+							val = km.group("val").strip()
+							if key == "OS":
+								os = val or None
+							elif key == "OX":
+								ox = val or None
+							elif key == "GN":
+								gn = val or None
+							elif key == "PE":
+								pe = val or None
+							elif key == "SV":
+								sv = val or None
+
+				current = {
+					"db": db or None,
+					"accession": accession or None,
+					"entry_name": entry_name or None,
+					"protein_name": protein_name,
+					"os": os,
+					"ox": ox,
+					"gn": gn,
+					"pe": pe,
+					"sv": sv,
+				}
+			else:
+				if current is None:
+					continue
+				seq_chunks.append(line.strip())
+
+	flush_current()
+
+	df = pd.DataFrame.from_records(records, columns = [
+		"db", "accession", "entry_name", "protein_name",
+		"os", "ox", "gn", "pe", "sv",
+		"sequence", "length"
+	])
 	return df
