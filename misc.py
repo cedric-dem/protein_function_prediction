@@ -262,12 +262,12 @@ def produce_test_result(test_fasta, test_taxonomy, ia):
 	for entry in entry_names.dropna():
 		entry_id = str(entry)
 		if len(term_pool) >= 2:
-			selected_terms = random.sample(term_pool, k = 2)
+			selected_terms = random.sample(term_pool, k = 3)
 		else:
-			selected_terms = random.choices(term_pool, k = 2)
+			selected_terms = random.choices(term_pool, k = 3)
 
 		for term in selected_terms:
-			score = round(random.uniform(0.3, 0.5), 3)
+			score = round(random.uniform(0.1, 0.2), 3)
 			rows.append({
 				"EntryID": entry_id,
 				"term": term,
@@ -275,5 +275,5 @@ def produce_test_result(test_fasta, test_taxonomy, ia):
 			})
 
 	submission = pd.DataFrame(rows, columns = ["EntryID", "term", "score"])
-	submission.to_csv("submission.tsv", sep = "\t", index = False)
+	submission.to_csv("submission.tsv", header = False, sep = "\t", index = False)
 	return submission
