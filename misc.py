@@ -1,5 +1,6 @@
 import re
 from pathlib import Path
+import random
 
 import pandas as pd
 
@@ -86,7 +87,7 @@ def _append_fasta_record(records, current, seq_chunks):
 	record["length"] = len(sequence) if sequence else 0
 	records.append(record)
 
-def read_fasta_file(file_path):
+def read_fasta_file(file_path, only_species):
 	file_path = Path(file_path)
 
 	if not file_path.exists():
@@ -123,6 +124,31 @@ def read_fasta_file(file_path):
 				_append_fasta_record(records, current, seq_chunks)
 				current = None
 				seq_chunks = []
+
+				if only_species:
+					header_body = line[1:].strip()
+					protein_name = None
+					os = None
+
+					if header_body:
+						parts = header_body.split(maxsplit = 1)
+						if parts:
+							protein_name = parts[0] or None
+							if len(parts) > 1:
+								os = parts[1] or None
+
+					current = {
+						"db": None,
+						"accession": None,
+						"entry_name": None,
+						"protein_name": protein_name,
+						"os": os,
+						"ox": None,
+						"gn": None,
+						"pe": None,
+						"sv": None,
+					}
+					continue
 
 				match = header_re.match(line)
 				if not match:
@@ -216,5 +242,38 @@ def read_ia_file(path):
 def train_model(go_basic, train_fasta, train_taxonomy, train_terms, ia):
 	pass
 
+
 def produce_test_result(test_fasta, test_taxonomy, ia):
-	pass
+	entry_names = test_fasta.get("protein_name")
+	if entry_names is None:
+		raise KeyError("test_fasta must contain an 'entry_name' column")
+
+	term_column = ia.get("term")
+	if term_column is None:
+		raise KeyError("ia must contain a 'term' column")
+
+	available_terms = term_column.dropna()
+	if available_terms.empty:
+		raise ValueError("ia 'term' column must contain at least one non-null value")
+
+	term_pool = available_terms.tolist()
+
+	rows = []
+	for entry in entry_names.dropna():
+		entry_id = str(entry)
+		if len(term_pool) >= 2:
+			selected_terms = random.sample(term_pool, k = 2)
+		else:
+			selected_terms = random.choices(term_pool, k = 2)
+
+		for term in selected_terms:
+			score = round(random.uniform(0.3, 0.5), 3)
+			rows.append({
+				"EntryID": entry_id,
+				"term": term,
+				"score": score,
+			})
+
+	submission = pd.DataFrame(rows, columns = ["EntryID", "term", "score"])
+	submission.to_csv("submission.tsv", sep = "\t", index = False)
+	return submission

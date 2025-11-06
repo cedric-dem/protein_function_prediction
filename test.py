@@ -3,7 +3,7 @@ from misc import *
 if __name__ == "__main__":
 	# Test ######
 
-	test_fasta = read_fasta_file("Test/testsuperset.fasta")  # amino acid sequences for proteins on which predictions should be made
+	test_fasta = read_fasta_file("Test/testsuperset.fasta", True)  # amino acid sequences for proteins on which predictions should be made
 	print('=> test ', test_fasta.head())
 
 	test_taxonomy = read_taxons_list("Test/testsuperset-taxon-list.tsv")  # taxon IDs for proteins in the test superset
