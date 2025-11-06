@@ -207,7 +207,14 @@ def read_taxons_list(path):
 	df = pd.read_csv(path, sep = '\t', header = 0, names = ["ID", "Species"], usecols = [0, 1])
 	return df
 
-
 def read_ia_file(path):
 	df = pd.read_csv(path, sep = '\t', header = None, names = ["term", "weight"], usecols = [0, 1])
 	return df
+
+def train_model(go_basic, train_fasta, train_taxonomy, train_terms, ia):
+	# TODO
+	pass
+
+def produce_test_result(test_fasta, test_taxonomy, ia):
+	# TODO
+	pass
