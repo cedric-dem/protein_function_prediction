@@ -194,3 +194,7 @@ def read_fasta_file(file_path):
 		"sequence", "length"
 	])
 	return df
+
+def read_taxonomy(path):
+	df = pd.read_csv(path, sep = '\t', header = None, names = ['id', 'taxon_name'], usecols = [0, 1])
+	return df
