@@ -329,10 +329,9 @@ def get_dataset(fasta, terms):
 def train_model(go_basic, train_fasta, train_taxonomy, train_terms, ia):
 	dataset = get_dataset(train_fasta, train_terms)
 
+	# train_xnn_with_hidden_layer() #todo
+	# train_xgb() #todo
 	train_nn(dataset)
-
-# train_xnn_with_hidden_layer() #todo
-# train_xgb() #todo
 
 def train_nn(dataset):
 	INPUT_SIZE = len(dataset[0].input)
@@ -354,7 +353,7 @@ def train_nn(dataset):
 	model.compile(optimizer = keras.optimizers.Adam(learning_rate = 0.001), loss = "mse", metrics = ["mae"])
 
 	print('==> fitting model')
-	model.fit(X, Y, epochs = 100, batch_size = 16, verbose = 1)
+	model.fit(X, Y, epochs = 100, batch_size = 32, verbose = 1)
 
 	print('==> saving model')
 	model.save("model_v0.keras")
