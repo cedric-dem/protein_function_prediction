@@ -12,7 +12,7 @@ if __name__ == "__main__":
 	train_taxonomy = read_taxonomy("Train/train_taxonomy.tsv")  # taxon IDs for proteins in the training set
 	print('=> train taxonomy', train_taxonomy.head())
 
-	train_terms = read_terms("Train/train_terms.tsv")  # the training set of proteins and corresponding annotated GO terms
+	train_terms = read_terms("Train/train_terms_tiny.tsv")  # the training set of proteins and corresponding annotated GO terms
 	print('=> train terms', train_terms.head())
 
 	ia = read_ia_file("IA.tsv")  # information accretion for each term (used to weight precision and recall)

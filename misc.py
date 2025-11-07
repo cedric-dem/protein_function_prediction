@@ -4,6 +4,14 @@ import random
 
 import pandas as pd
 
+def get_list_of_raw_terms():
+	complete_df = read_obo_file("Train/go-basic.obo")
+	raw_terms_list = []
+	for index, rows in complete_df.iterrows():
+		raw_terms_list.append(rows.id)
+	raw_terms_list.sort()
+	return raw_terms_list
+
 def _obo_row(term):
 	row = {}
 	for key in ["id", "name", "namespace", "def", "synonym", "is_a"]:
@@ -68,8 +76,6 @@ def read_obo_file(path):
 						term[key].append(value)
 					else:
 						term[key] = value
-
-	#_append_obo_term(terms, term)
 
 	df = pd.DataFrame(terms, columns = ["id", "name", "namespace", "def", "synonym", "is_a"])
 	return df
@@ -239,9 +245,87 @@ def read_ia_file(path):
 	df = pd.read_csv(path, sep = '\t', header = None, names = ["term", "weight"], usecols = [0, 1])
 	return df
 
-def train_model(go_basic, train_fasta, train_taxonomy, train_terms, ia):
-	pass
+class dataPoint(object):
+	def __init__(self, raw_input, raw_output):
+		self.raw_input = raw_input
+		self.input = get_shaped_input(raw_input)
 
+		self.raw_output = raw_output
+
+		self.output = None
+		if raw_output:
+			self.output = get_shaped_output(raw_output)
+
+def get_matrix_occurences(amino_acid_list):
+	matrix_occurences = [[0 for i in range(len(positions))] for j in range(len(positions))]
+
+	for i in range(1, len(amino_acid_list)):
+		old_car = amino_acid_list[i - 1]
+		new_car = amino_acid_list[i]
+
+		old_position = positions.index(old_car)
+		new_position = positions.index(new_car)
+
+		matrix_occurences[old_position][new_position] += 1
+
+	# todo try in percentage
+	# TODO try non linear like project 1 to 0.5, 10 to 0.9, 100 to 0.9999 etc
+
+	# for line in matrix_occurences:
+	#	print(line)
+	return matrix_occurences
+
+def get_shaped_input(amino_acid_list):
+	matrix_occurences = get_matrix_occurences(amino_acid_list)
+	occurences_as_vector = [x / 1300 for line in matrix_occurences for x in line]
+
+	start = [0 for _ in range(len(matrix_occurences))]
+	end = [0 for _ in range(len(matrix_occurences))]
+
+	start[positions.index(amino_acid_list[0])] = 1
+	end[positions.index(amino_acid_list[1])] = 1
+
+	size = len(amino_acid_list)  # todo split in size size_perentile, like 10 values, 1 at the proportion
+
+	return occurences_as_vector + start + end + [size / 36000]
+
+def get_shaped_output(raw_output):
+	result = [0 for _ in range(len(all_terms))]
+	for current_output in raw_output:
+		result[all_terms.index(current_output)] = 1
+	return result
+
+def get_terms_as_dict(terms):
+	result = {}
+	for index, row in terms.iterrows():
+		if row["EntryID"] not in result:
+			result[row["EntryID"]] = []
+
+		result[row["EntryID"]].append(row["term"])
+
+	return result
+
+def get_dataset(fasta, terms):
+	terms_as_dict = get_terms_as_dict(terms)
+	dataset = []
+
+	for index, row in fasta.iterrows():
+		sequence = row['sequence']
+		name = row['accession']
+
+		list_terms = []
+		if name in terms_as_dict:  # for debug, should not be outside if
+			list_terms = terms_as_dict[name]
+
+		new_datapoint = dataPoint(sequence, list_terms)
+		dataset.append(new_datapoint)
+
+	return dataset
+
+def train_model(go_basic, train_fasta, train_taxonomy, train_terms, ia):
+	dataset = get_dataset(train_fasta, train_terms)
+	# TODO
+	pass
 
 def produce_test_result(test_fasta, test_taxonomy, ia):
 	entry_names = test_fasta.get("protein_name")
@@ -277,3 +361,12 @@ def produce_test_result(test_fasta, test_taxonomy, ia):
 	submission = pd.DataFrame(rows, columns = ["EntryID", "term", "score"])
 	submission.to_csv("submission.tsv", header = False, sep = "\t", index = False)
 	return submission
+
+######
+
+# positions = ['A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W', 'Y']
+# Dont know why but some have b, u,x
+positions = ['A', "B", 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', "U", 'V', 'W', "X", 'Y']
+all_terms = get_list_of_raw_terms()
+
+######
