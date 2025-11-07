@@ -391,25 +391,44 @@ def get_random_submission(test_fasta, test_taxonomy, ia):
 	return rows
 
 def predict_output(predictor, formatted_input):
-	vector = np.asarray(formatted_input, dtype = np.float32).reshape(1, -1)
-	return predictor.predict(vector, batch_size = 1)  # or predictor.predict_on_batch(vector)
+	vector = np.asarray(formatted_input, dtype = np.float32)
+	if vector.ndim == 1:
+		vector = vector.reshape(1, -1)
+	return predictor.predict(vector, batch_size = 32)  # or predictor.predict_on_batch(vector)
+
+def process_batch(predictor, lowest_value, result, names, inputs):
+	if not inputs:
+		return
+	predictions = predict_output(predictor, inputs)
+	for protein_name, vector in zip(names, predictions):
+		for output_index, score in enumerate(vector):
+			if score > lowest_value:
+				result.append([protein_name, all_terms[output_index], round(score, 3)])
 
 def get_nn_submission(test_fasta, test_taxonomy, ia):
 	lowest_value = 0.001
 	result = []
 	predictor = keras.models.load_model("model_v0.keras")
 
-	for index, row in test_fasta.head(100).iterrows():
-		#for index, row in test_fasta.iterrows():
+	batch_size = 32
+	batch_inputs = []
+	batch_names = []
+
+	for index, row in test_fasta.head(1000).iterrows():
 		this_protein_name = row["protein_name"]
 
 		this_sequence = row["sequence"]
 
 		formatted_input = get_shaped_input(this_sequence)
-		output_vector = predict_output(predictor, formatted_input)
-		for output_index in range(len(output_vector[0])):
-			if output_vector[0][output_index] > lowest_value:
-				result.append([this_protein_name, all_terms[output_index], round(output_vector[0][output_index],3)])
+		batch_inputs.append(formatted_input)
+		batch_names.append(this_protein_name)
+
+		if len(batch_inputs) == batch_size:
+			process_batch(predictor, lowest_value, result, batch_names, batch_inputs)
+			batch_inputs = []
+			batch_names = []
+
+	process_batch(predictor, lowest_value, result, batch_names, batch_inputs)
 
 	return result
 
