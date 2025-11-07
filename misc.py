@@ -399,7 +399,7 @@ def get_nn_submission(test_fasta, test_taxonomy, ia):
 	result = []
 	predictor = keras.models.load_model("model_v0.keras")
 
-	for index, row in test_fasta.head(100).iterrows():
+	for index, row in test_fasta.iterrows():
 		this_protein_name = row["protein_name"]
 
 		this_sequence = row["sequence"]
