@@ -3,6 +3,12 @@ from pathlib import Path
 import random
 
 import pandas as pd
+from dataclasses import dataclass
+from typing import List
+import numpy as np
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers
 
 def get_list_of_raw_terms():
 	complete_df = read_obo_file("Train/go-basic.obo")
@@ -324,8 +330,39 @@ def get_dataset(fasta, terms):
 
 def train_model(go_basic, train_fasta, train_taxonomy, train_terms, ia):
 	dataset = get_dataset(train_fasta, train_terms)
-	# TODO
-	pass
+
+	train_nn(dataset)
+
+def train_nn(dataset):
+	N = len(dataset[0].input)
+	M = len(dataset[0].output)
+
+	for dp in dataset:
+		if len(dp.input) != N or len(dp.output) != M:
+			raise ValueError("duhhh")
+
+	X = np.array([dp.input for dp in dataset], dtype = np.float32)
+	Y = np.array([dp.output for dp in dataset], dtype = np.float32)
+
+	model = keras.Sequential([
+		layers.Input(shape = (N,)),
+		layers.Dense(M, activation = None)
+	])
+
+	model.compile(
+		optimizer = keras.optimizers.Adam(learning_rate = 0.001),
+		loss = "mse",
+		metrics = ["mae"]
+	)
+
+	model.fit(
+		X, Y,
+		epochs = 100,
+		batch_size = 16,
+		verbose = 1
+	)
+
+	model.save("model_v0.keras")
 
 def produce_test_result(test_fasta, test_taxonomy, ia):
 	entry_names = test_fasta.get("protein_name")
