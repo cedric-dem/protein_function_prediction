@@ -2,7 +2,7 @@ import random
 from pathlib import Path
 
 def subsample_fasta():
-	keep_prob = 0.09
+	keep_prob = 0.20
 
 	input_path = Path("train_sequences.fasta")
 	output_path = Path("train_sequences_tiny.fasta")

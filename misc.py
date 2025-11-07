@@ -4,6 +4,7 @@ import random
 
 import pandas as pd
 from dataclasses import dataclass
+from config import *
 from typing import List
 import numpy as np
 import tensorflow as tf
@@ -280,7 +281,7 @@ def get_matrix_occurences(amino_acid_list):
 
 def get_shaped_input(amino_acid_list):
 	matrix_occurences = get_matrix_occurences(amino_acid_list)
-	occurences_as_vector = (matrix_occurences / 1300.0).reshape(-1)
+	occurences_as_vector = np.sqrt(matrix_occurences / 1300).reshape(-1)
 
 	start = np.zeros(len(matrix_occurences), dtype = np.float32)
 	end = np.zeros(len(matrix_occurences), dtype = np.float32)
@@ -330,12 +331,14 @@ def train_model(go_basic, train_fasta, train_taxonomy, train_terms, ia):
 
 	# train_xnn_with_hidden_layer() #todo
 	# train_xgb() #todo
+	# knn also todo
 	train_nn(dataset)
 
 def train_nn(dataset):
 	INPUT_SIZE = len(dataset[0].input)
 	OUTPUT_SIZE = len(dataset[0].output)
 	print('==> Neural Network I/O Size :', INPUT_SIZE, '/', OUTPUT_SIZE)
+	print("==> Dataset size ",len(dataset))
 
 	for dp in dataset:
 		if len(dp.input) != INPUT_SIZE or len(dp.output) != OUTPUT_SIZE:
@@ -355,7 +358,7 @@ def train_nn(dataset):
 	model.fit(X, Y, epochs = 10, batch_size = 32, verbose = 1)
 
 	print('==> saving model')
-	model.save("model_v0.keras")
+	model.save(model_name)
 
 def get_random_submission(test_fasta, test_taxonomy, ia):
 	entry_names = test_fasta.get("protein_name")
@@ -406,16 +409,17 @@ def process_batch(predictor, lowest_value, result, names, inputs):
 				result.append([protein_name, all_terms[output_index], round(score, 3)])
 
 def get_nn_submission(test_fasta, test_taxonomy, ia):
-	lowest_value = 0.1
 	result = []
-	predictor = keras.models.load_model("model_v0.keras")
+	predictor = keras.models.load_model(model_name)
 
 	batch_size = 32
 	batch_inputs = []
 	batch_names = []
 
-	#for index, row in test_fasta.head(100000).iterrows():
-	for index, row in test_fasta.iterrows():
+	total_rows = len(test_fasta)
+
+	next_progress = 10
+	for row_number, (index, row) in enumerate(test_fasta.head(35000).iterrows(), start = 1):
 		this_protein_name = row["protein_name"]
 
 		this_sequence = row["sequence"]
@@ -423,6 +427,10 @@ def get_nn_submission(test_fasta, test_taxonomy, ia):
 		formatted_input = get_shaped_input(this_sequence)
 		batch_inputs.append(formatted_input)
 		batch_names.append(this_protein_name)
+		while total_rows and next_progress <= 100 and row_number * 100 >= next_progress * total_rows:
+			print(f"=========> Processed {row_number}/{total_rows} rows ({next_progress}%): index {index}")
+			next_progress += 10
+
 
 		if len(batch_inputs) == batch_size:
 			process_batch(predictor, lowest_value, result, batch_names, batch_inputs)
@@ -445,10 +453,6 @@ def produce_test_result(test_fasta, test_taxonomy, ia):
 
 ######
 
-STRATEGY = "NN"
-# positions = ['A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W', 'Y']
-# Dont know why but some have b, u,x
-positions = ['A', "B", 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', "U", 'V', 'W', "X", 'Y', "Z"]
 all_terms = get_list_of_raw_terms()
 
 ######
