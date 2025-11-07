@@ -260,7 +260,7 @@ class dataPoint(object):
 		self.output = get_shaped_output(raw_output)
 
 def get_matrix_occurences(amino_acid_list):
-	matrix_occurences = [[0 for i in range(len(positions))] for j in range(len(positions))]
+	matrix_occurences = np.zeros((len(positions), len(positions)), dtype = np.float32)
 
 	for i in range(1, len(amino_acid_list)):
 		old_car = amino_acid_list[i - 1]
@@ -269,7 +269,7 @@ def get_matrix_occurences(amino_acid_list):
 		old_position = positions.index(old_car)
 		new_position = positions.index(new_car)
 
-		matrix_occurences[old_position][new_position] += 1
+		matrix_occurences[old_position, new_position] += 1
 
 	# todo try in percentage
 	# TODO try non linear like project 1 to 0.5, 10 to 0.9, 100 to 0.9999 etc
@@ -280,20 +280,20 @@ def get_matrix_occurences(amino_acid_list):
 
 def get_shaped_input(amino_acid_list):
 	matrix_occurences = get_matrix_occurences(amino_acid_list)
-	occurences_as_vector = [x / 1300 for line in matrix_occurences for x in line]
+	occurences_as_vector = (matrix_occurences / 1300.0).reshape(-1)
 
-	start = [0 for _ in range(len(matrix_occurences))]
-	end = [0 for _ in range(len(matrix_occurences))]
+	start = np.zeros(len(matrix_occurences), dtype = np.float32)
+	end = np.zeros(len(matrix_occurences), dtype = np.float32)
 
 	start[positions.index(amino_acid_list[0])] = 1
 	end[positions.index(amino_acid_list[1])] = 1
 
 	size = len(amino_acid_list)  # todo split in size size_perentile, like 10 values, 1 at the proportion
 
-	return occurences_as_vector + start + end + [size / 36000]
+	return np.concatenate((occurences_as_vector, start, end, np.array([size / 36000.0], dtype = np.float32)))
 
 def get_shaped_output(raw_output):
-	result = [0 for _ in range(len(all_terms))]
+	result = np.zeros(len(all_terms), dtype = np.float32)
 	for current_output in raw_output:
 		result[all_terms.index(current_output)] = 1
 	return result
@@ -352,7 +352,7 @@ def train_nn(dataset):
 	model.compile(optimizer = keras.optimizers.Adam(learning_rate = 0.001), loss = "mse", metrics = ["mae"])
 
 	print('==> fitting model')
-	model.fit(X, Y, epochs = 100, batch_size = 32, verbose = 1)
+	model.fit(X, Y, epochs = 10, batch_size = 32, verbose = 1)
 
 	print('==> saving model')
 	model.save("model_v0.keras")
@@ -399,7 +399,8 @@ def get_nn_submission(test_fasta, test_taxonomy, ia):
 	result = []
 	predictor = keras.models.load_model("model_v0.keras")
 
-	for index, row in test_fasta.iterrows():
+	for index, row in test_fasta.head(100).iterrows():
+		#for index, row in test_fasta.iterrows():
 		this_protein_name = row["protein_name"]
 
 		this_sequence = row["sequence"]
