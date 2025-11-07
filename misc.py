@@ -301,7 +301,10 @@ def get_shaped_output(raw_output):
 
 def get_terms_as_dict(terms):
 	result = {}
+	print("====> start retrieve dict terms")
 	for index, row in terms.iterrows():
+		if index % 2000 == 0:
+			print('======> current pos in loop',index,"/",terms.shape[0])
 		if row["EntryID"] not in result:
 			result[row["EntryID"]] = []
 
@@ -313,7 +316,10 @@ def get_dataset(fasta, terms):
 	terms_as_dict = get_terms_as_dict(terms)
 	dataset = []
 
+	print('====> Start retreive of fassta')
 	for index, row in fasta.iterrows():
+		if index % 2000 == 0:
+			print("======> position in current loop  ", index, "/", fasta.shape[0])
 		sequence = row['sequence']
 		name = row['accession']
 
@@ -338,7 +344,7 @@ def train_nn(dataset):
 	INPUT_SIZE = len(dataset[0].input)
 	OUTPUT_SIZE = len(dataset[0].output)
 	print('==> Neural Network I/O Size :', INPUT_SIZE, '/', OUTPUT_SIZE)
-	print("==> Dataset size ",len(dataset))
+	print("==> Dataset size ", len(dataset))
 
 	for dp in dataset:
 		if len(dp.input) != INPUT_SIZE or len(dp.output) != OUTPUT_SIZE:
@@ -355,7 +361,7 @@ def train_nn(dataset):
 	model.compile(optimizer = keras.optimizers.Adam(learning_rate = 0.001), loss = "mse", metrics = ["mae"])
 
 	print('==> fitting model')
-	model.fit(X, Y, epochs = 10, batch_size = 32, verbose = 1)
+	model.fit(X, Y, epochs = 10, batch_size = BATCH_SIZE_TRAIN, verbose = 1)
 
 	print('==> saving model')
 	model.save(model_name)
@@ -405,21 +411,22 @@ def process_batch(predictor, lowest_value, result, names, inputs):
 	predictions = predict_output(predictor, inputs)
 	for protein_name, vector in zip(names, predictions):
 		for output_index, score in enumerate(vector):
-			if score > lowest_value:
+			if score > lowest_value: # todo : try with only take max on that, not every single one
 				result.append([protein_name, all_terms[output_index], round(score, 3)])
 
 def get_nn_submission(test_fasta, test_taxonomy, ia):
 	result = []
 	predictor = keras.models.load_model(model_name)
 
-	batch_size = 32
 	batch_inputs = []
 	batch_names = []
 
 	total_rows = len(test_fasta)
 
-	next_progress = 10
-	for row_number, (index, row) in enumerate(test_fasta.head(35000).iterrows(), start = 1):
+	display_every_percentage = 3
+
+	next_progress = display_every_percentage
+	for row_number, (index, row) in enumerate(test_fasta.iterrows(), start = 1):
 		this_protein_name = row["protein_name"]
 
 		this_sequence = row["sequence"]
@@ -429,10 +436,9 @@ def get_nn_submission(test_fasta, test_taxonomy, ia):
 		batch_names.append(this_protein_name)
 		while total_rows and next_progress <= 100 and row_number * 100 >= next_progress * total_rows:
 			print(f"=========> Processed {row_number}/{total_rows} rows ({next_progress}%): index {index}")
-			next_progress += 10
+			next_progress += display_every_percentage
 
-
-		if len(batch_inputs) == batch_size:
+		if len(batch_inputs) == BATCH_SIZE_TEST:
 			process_batch(predictor, lowest_value, result, batch_names, batch_inputs)
 			batch_inputs = []
 			batch_names = []
