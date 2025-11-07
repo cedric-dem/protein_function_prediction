@@ -333,34 +333,27 @@ def train_model(go_basic, train_fasta, train_taxonomy, train_terms, ia):
 
 	train_nn(dataset)
 
+# train_xnn_with_hidden_layer() #todo
+# train_xgb() #todo
+
 def train_nn(dataset):
-	N = len(dataset[0].input)
-	M = len(dataset[0].output)
+	INPUT_SIZE = len(dataset[0].input)
+	OUTPUT_SIZE = len(dataset[0].output)
+
+	print('==> Neural Network I/O Size :',INPUT_SIZE, '/', OUTPUT_SIZE)
 
 	for dp in dataset:
-		if len(dp.input) != N or len(dp.output) != M:
+		if len(dp.input) != INPUT_SIZE or len(dp.output) != OUTPUT_SIZE:
 			raise ValueError("duhhh")
 
 	X = np.array([dp.input for dp in dataset], dtype = np.float32)
 	Y = np.array([dp.output for dp in dataset], dtype = np.float32)
 
-	model = keras.Sequential([
-		layers.Input(shape = (N,)),
-		layers.Dense(M, activation = None)
-	])
+	model = keras.Sequential([layers.Input(shape = (INPUT_SIZE,)),layers.Dense(OUTPUT_SIZE, activation = None)])
 
-	model.compile(
-		optimizer = keras.optimizers.Adam(learning_rate = 0.001),
-		loss = "mse",
-		metrics = ["mae"]
-	)
+	model.compile(optimizer = keras.optimizers.Adam(learning_rate = 0.001), loss = "mse", metrics = ["mae"])
 
-	model.fit(
-		X, Y,
-		epochs = 100,
-		batch_size = 16,
-		verbose = 1
-	)
+	model.fit(X, Y, epochs = 100, batch_size = 16, verbose = 1)
 
 	model.save("model_v0.keras")
 
