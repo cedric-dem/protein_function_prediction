@@ -406,7 +406,7 @@ def process_batch(predictor, lowest_value, result, names, inputs):
 				result.append([protein_name, all_terms[output_index], round(score, 3)])
 
 def get_nn_submission(test_fasta, test_taxonomy, ia):
-	lowest_value = 0.001
+	lowest_value = 0.1
 	result = []
 	predictor = keras.models.load_model("model_v0.keras")
 
@@ -414,7 +414,8 @@ def get_nn_submission(test_fasta, test_taxonomy, ia):
 	batch_inputs = []
 	batch_names = []
 
-	for index, row in test_fasta.head(1000).iterrows():
+	#for index, row in test_fasta.head(100000).iterrows():
+	for index, row in test_fasta.iterrows():
 		this_protein_name = row["protein_name"]
 
 		this_sequence = row["sequence"]
@@ -447,7 +448,7 @@ def produce_test_result(test_fasta, test_taxonomy, ia):
 STRATEGY = "NN"
 # positions = ['A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W', 'Y']
 # Dont know why but some have b, u,x
-positions = ['A', "B", 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', "U", 'V', 'W', "X", 'Y']
+positions = ['A', "B", 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', "U", 'V', 'W', "X", 'Y', "Z"]
 all_terms = get_list_of_raw_terms()
 
 ######
