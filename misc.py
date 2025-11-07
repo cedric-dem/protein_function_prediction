@@ -253,7 +253,6 @@ def read_ia_file(path):
 
 class dataPoint(object):
 	def __init__(self, raw_input, raw_output):
-
 		self.raw_input = raw_input
 		self.input = get_shaped_input(raw_input)
 
@@ -358,7 +357,7 @@ def train_nn(dataset):
 	print('==> saving model')
 	model.save("model_v0.keras")
 
-def produce_test_result(test_fasta, test_taxonomy, ia):
+def get_random_submission(test_fasta, test_taxonomy, ia):
 	entry_names = test_fasta.get("protein_name")
 	if entry_names is None:
 		raise KeyError("test_fasta must contain an 'entry_name' column")
@@ -389,12 +388,43 @@ def produce_test_result(test_fasta, test_taxonomy, ia):
 				"score": score,
 			})
 
+	return rows
+
+def predict_output(predictor, formatted_input):
+	vector = np.asarray(formatted_input, dtype = np.float32).reshape(1, -1)
+	return predictor.predict(vector, batch_size = 1)  # or predictor.predict_on_batch(vector)
+
+def get_nn_submission(test_fasta, test_taxonomy, ia):
+	lowest_value = 0.001
+	result = []
+	predictor = keras.models.load_model("model_v0.keras")
+
+	for index, row in test_fasta.head(100).iterrows():
+		this_protein_name = row["protein_name"]
+
+		this_sequence = row["sequence"]
+
+		formatted_input = get_shaped_input(this_sequence)
+		output_vector = predict_output(predictor, formatted_input)
+		for output_index in range(len(output_vector[0])):
+			if output_vector[0][output_index] > lowest_value:
+				result.append([this_protein_name, all_terms[output_index], round(output_vector[0][output_index],3)])
+
+	return result
+
+def produce_test_result(test_fasta, test_taxonomy, ia):
+	if STRATEGY == "RANDOM":
+		rows = get_random_submission(test_fasta, test_taxonomy, ia)
+
+	elif STRATEGY == "NN":
+		rows = get_nn_submission(test_fasta, test_taxonomy, ia)
 	submission = pd.DataFrame(rows, columns = ["EntryID", "term", "score"])
 	submission.to_csv("submission.tsv", header = False, sep = "\t", index = False)
 	return submission
 
 ######
 
+STRATEGY = "NN"
 # positions = ['A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W', 'Y']
 # Dont know why but some have b, u,x
 positions = ['A', "B", 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', "U", 'V', 'W', "X", 'Y']
