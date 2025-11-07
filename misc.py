@@ -69,7 +69,7 @@ def read_obo_file(path):
 					else:
 						term[key] = value
 
-	_append_obo_term(terms, term)
+	#_append_obo_term(terms, term)
 
 	df = pd.DataFrame(terms, columns = ["id", "name", "namespace", "def", "synonym", "is_a"])
 	return df
