@@ -349,12 +349,16 @@ def train_nn(dataset):
 	X = np.array([dp.input for dp in dataset], dtype = np.float32)
 	Y = np.array([dp.output for dp in dataset], dtype = np.float32)
 
+	print('==> building model')
 	model = keras.Sequential([layers.Input(shape = (INPUT_SIZE,)),layers.Dense(OUTPUT_SIZE, activation = None)])
 
+	print('==> compile model')
 	model.compile(optimizer = keras.optimizers.Adam(learning_rate = 0.001), loss = "mse", metrics = ["mae"])
 
+	print('==> fitting model')
 	model.fit(X, Y, epochs = 100, batch_size = 16, verbose = 1)
 
+	print('==> saving model')
 	model.save("model_v0.keras")
 
 def produce_test_result(test_fasta, test_taxonomy, ia):
