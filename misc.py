@@ -253,14 +253,12 @@ def read_ia_file(path):
 
 class dataPoint(object):
 	def __init__(self, raw_input, raw_output):
+
 		self.raw_input = raw_input
 		self.input = get_shaped_input(raw_input)
 
 		self.raw_output = raw_output
-
-		self.output = None
-		if raw_output:
-			self.output = get_shaped_output(raw_output)
+		self.output = get_shaped_output(raw_output)
 
 def get_matrix_occurences(amino_acid_list):
 	matrix_occurences = [[0 for i in range(len(positions))] for j in range(len(positions))]
