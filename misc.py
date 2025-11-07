@@ -339,18 +339,18 @@ def train_model(go_basic, train_fasta, train_taxonomy, train_terms, ia):
 def train_nn(dataset):
 	INPUT_SIZE = len(dataset[0].input)
 	OUTPUT_SIZE = len(dataset[0].output)
-
-	print('==> Neural Network I/O Size :',INPUT_SIZE, '/', OUTPUT_SIZE)
+	print('==> Neural Network I/O Size :', INPUT_SIZE, '/', OUTPUT_SIZE)
 
 	for dp in dataset:
 		if len(dp.input) != INPUT_SIZE or len(dp.output) != OUTPUT_SIZE:
 			raise ValueError("duhhh")
 
+	print('==> converting as array')
 	X = np.array([dp.input for dp in dataset], dtype = np.float32)
 	Y = np.array([dp.output for dp in dataset], dtype = np.float32)
 
 	print('==> building model')
-	model = keras.Sequential([layers.Input(shape = (INPUT_SIZE,)),layers.Dense(OUTPUT_SIZE, activation = None)])
+	model = keras.Sequential([layers.Input(shape = (INPUT_SIZE,)), layers.Dense(OUTPUT_SIZE, activation = None)])
 
 	print('==> compile model')
 	model.compile(optimizer = keras.optimizers.Adam(learning_rate = 0.001), loss = "mse", metrics = ["mae"])
