@@ -3,9 +3,8 @@ from pathlib import Path
 import random
 
 import pandas as pd
-from dataclasses import dataclass
 from config import *
-from typing import List
+from typing import Optional, Tuple
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
@@ -252,13 +251,104 @@ def read_ia_file(path):
 	df = pd.read_csv(path, sep = '\t', header = None, names = ["term", "weight"], usecols = [0, 1])
 	return df
 
-class dataPoint(object):
-	def __init__(self, raw_input, raw_output):
-		self.raw_input = raw_input
-		self.input = get_shaped_input(raw_input)
+class StreamingTrainingSequence(keras.utils.Sequence):
+	def __init__(self, fasta_df, terms_dict, batch_size):
+		self.fasta_df = fasta_df
+		self.terms_dict = terms_dict
+		self.batch_size = batch_size
 
-		self.raw_output = raw_output
-		self.output = get_shaped_output(raw_output)
+		self.valid_indices = []
+		self.sample_count = 0
+		self._first_item_cache: Optional[Tuple[np.ndarray, np.ndarray]] = None
+		self._first_index: Optional[int] = None
+		self._first_batch_cache: Optional[Tuple[np.ndarray, np.ndarray]] = None
+
+		print('====> Start retreive of fassta')
+		total_rows = fasta_df.shape[0]
+		for position, (index, row) in enumerate(fasta_df.iterrows()):
+			if position % 2000 == 0:
+				print("======> position in current loop  ", position, "/", total_rows)
+
+			sequence = row['sequence']
+			if not isinstance(sequence, str) or len(sequence) < 2:
+				continue
+
+			accession = row['accession']
+
+			if self._first_item_cache is None:
+				terms_list = terms_dict.get(accession, [])
+				shaped_input = get_shaped_input(sequence)
+				shaped_output = get_shaped_output(terms_list)
+				self._first_item_cache = (shaped_input, shaped_output)
+				self._first_index = index
+
+			self.valid_indices.append(index)
+
+		self.sample_count = len(self.valid_indices)
+
+		if self.sample_count == 0:
+			raise ValueError("No valid training samples found in FASTA file")
+
+	def __len__(self):
+		if self.sample_count == 0:
+			return 0
+		return (self.sample_count + self.batch_size - 1) // self.batch_size
+
+	def _create_batch(self, batch_indices):
+		batch_inputs = []
+		batch_outputs = []
+
+		for idx in batch_indices:
+			if self._first_item_cache is not None and idx == self._first_index:
+				shaped_input, shaped_output = self._first_item_cache
+			else:
+				row = self.fasta_df.loc[idx]
+				sequence = row['sequence']
+				accession = row['accession']
+
+				if not isinstance(sequence, str) or len(sequence) < 2:
+					continue
+
+				terms_list = self.terms_dict.get(accession, [])
+				shaped_input = get_shaped_input(sequence)
+				shaped_output = get_shaped_output(terms_list)
+
+			batch_inputs.append(shaped_input)
+			batch_outputs.append(shaped_output)
+
+		if not batch_inputs:
+			raise ValueError("Encountered an empty batch during training generation")
+
+		inputs = np.stack(batch_inputs).astype(np.float32, copy = False)
+		outputs = np.stack(batch_outputs).astype(np.float32, copy = False)
+		return inputs, outputs
+
+	def __getitem__(self, batch_idx):
+		if batch_idx < 0 or batch_idx >= len(self):
+			raise IndexError('Batch index out of range')
+
+		if batch_idx == 0 and self._first_batch_cache is not None:
+			return self._first_batch_cache
+
+		start = batch_idx * self.batch_size
+		end = min(start + self.batch_size, self.sample_count)
+		batch_indices = self.valid_indices[start:end]
+
+		batch = self._create_batch(batch_indices)
+
+		if batch_idx == 0:
+			self._first_batch_cache = batch
+
+		return batch
+
+	def on_epoch_end(self):
+		self._first_batch_cache = None
+
+	def peek_batch(self):
+		if self._first_batch_cache is None:
+			first_indices = self.valid_indices[: self.batch_size]
+			self._first_batch_cache = self._create_batch(first_indices)
+		return self._first_batch_cache
 
 def get_matrix_occurences(amino_acid_list):
 	matrix_occurences = np.zeros((len(positions), len(positions)), dtype = np.float32)
@@ -304,7 +394,7 @@ def get_terms_as_dict(terms):
 	print("====> start retrieve dict terms")
 	for index, row in terms.iterrows():
 		if index % 2000 == 0:
-			print('======> current pos in loop',index,"/",terms.shape[0])
+			print('======> current pos in loop', index, "/", terms.shape[0])
 		if row["EntryID"] not in result:
 			result[row["EntryID"]] = []
 
@@ -314,23 +404,7 @@ def get_terms_as_dict(terms):
 
 def get_dataset(fasta, terms):
 	terms_as_dict = get_terms_as_dict(terms)
-	dataset = []
-
-	print('====> Start retreive of fassta')
-	for index, row in fasta.iterrows():
-		if index % 2000 == 0:
-			print("======> position in current loop  ", index, "/", fasta.shape[0])
-		sequence = row['sequence']
-		name = row['accession']
-
-		list_terms = []
-		if name in terms_as_dict:  # for debug, should not be outside if
-			list_terms = terms_as_dict[name]
-
-		new_datapoint = dataPoint(sequence, list_terms)
-		dataset.append(new_datapoint)
-
-	return dataset
+	return StreamingTrainingSequence(fasta, terms_as_dict, BATCH_SIZE_TRAIN)
 
 def train_model(go_basic, train_fasta, train_taxonomy, train_terms, ia):
 	dataset = get_dataset(train_fasta, train_terms)
@@ -341,18 +415,13 @@ def train_model(go_basic, train_fasta, train_taxonomy, train_terms, ia):
 	train_nn(dataset)
 
 def train_nn(dataset):
-	INPUT_SIZE = len(dataset[0].input)
-	OUTPUT_SIZE = len(dataset[0].output)
+	first_inputs, first_outputs = dataset.peek_batch()
+
+	INPUT_SIZE = first_inputs.shape[1]
+	OUTPUT_SIZE = first_outputs.shape[1]
+
 	print('==> Neural Network I/O Size :', INPUT_SIZE, '/', OUTPUT_SIZE)
-	print("==> Dataset size ", len(dataset))
-
-	for dp in dataset:
-		if len(dp.input) != INPUT_SIZE or len(dp.output) != OUTPUT_SIZE:
-			raise ValueError("duhhh")
-
-	print('==> converting as array')
-	X = np.array([dp.input for dp in dataset], dtype = np.float32)
-	Y = np.array([dp.output for dp in dataset], dtype = np.float32)
+	print("==> Dataset size ", dataset.sample_count)
 
 	print('==> building model')
 	model = keras.Sequential([layers.Input(shape = (INPUT_SIZE,)), layers.Dense(OUTPUT_SIZE, activation = None)])
@@ -361,7 +430,7 @@ def train_nn(dataset):
 	model.compile(optimizer = keras.optimizers.Adam(learning_rate = 0.001), loss = "mse", metrics = ["mae"])
 
 	print('==> fitting model')
-	model.fit(X, Y, epochs = 10, batch_size = BATCH_SIZE_TRAIN, verbose = 1)
+	model.fit(dataset, epochs = N_EPOCHS, verbose = 1)
 
 	print('==> saving model')
 	model.save(model_name)
@@ -411,7 +480,7 @@ def process_batch(predictor, lowest_value, result, names, inputs):
 	predictions = predict_output(predictor, inputs)
 	for protein_name, vector in zip(names, predictions):
 		for output_index, score in enumerate(vector):
-			if score > lowest_value: # todo : try with only take max on that, not every single one
+			if score > lowest_value:  # todo : try with only take max on that, not every single one
 				result.append([protein_name, all_terms[output_index], round(score, 3)])
 
 def get_nn_submission(test_fasta, test_taxonomy, ia):

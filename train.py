@@ -6,7 +6,7 @@ if __name__ == "__main__":
 	go_basic = read_obo_file("Train/go-basic.obo")  # ontology graph structure
 	print('=> finished reading Go basic')  # , go_basic.head())
 
-	train_fasta = read_fasta_file("Train/train_sequences_tiny.fasta", False)  # amino acid sequences for proteins in the training set
+	train_fasta = read_fasta_file("Train/train_sequences.fasta", False)  # amino acid sequences for proteins in the training set
 	print('=> finished reading train fasta')  # , train_fasta.head())
 
 	train_taxonomy = read_taxonomy("Train/train_taxonomy.tsv")  # taxon IDs for proteins in the training set
