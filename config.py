@@ -1,4 +1,4 @@
-lowest_value = 0.2
+lowest_value = 0.1
 
 model_name = "model_v3.keras"
 
