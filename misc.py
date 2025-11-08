@@ -481,7 +481,8 @@ def process_batch(predictor, lowest_value, result, names, inputs):
 	for protein_name, vector in zip(names, predictions):
 		for output_index, score in enumerate(vector):
 			if score > lowest_value:  # todo : try with only take max on that, not every single one
-				result.append([protein_name, all_terms[output_index], round(score, 3)])
+				score = min(round(score, 3),1.0)
+				result.append([protein_name, all_terms[output_index], score])
 
 def get_nn_submission(test_fasta, test_taxonomy, ia):
 	result = []
