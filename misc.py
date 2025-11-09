@@ -424,7 +424,10 @@ def train_nn(dataset):
 	print("==> Dataset size ", dataset.sample_count)
 
 	print('==> building model')
-	model = keras.Sequential([layers.Input(shape = (INPUT_SIZE,)), layers.Dense(OUTPUT_SIZE, activation = None)])
+	if HIDDEN_LAYER == None:
+		model = keras.Sequential([layers.Input(shape = (INPUT_SIZE,)), layers.Dense(OUTPUT_SIZE, activation = None)])
+	else:
+		model = keras.Sequential([layers.Input(shape = (INPUT_SIZE,)), layers.Dense(HIDDEN_LAYER, activation = 'sigmoid'), layers.Dense(OUTPUT_SIZE, activation = None)])
 
 	print('==> compile model')
 	model.compile(optimizer = keras.optimizers.Adam(learning_rate = 0.001), loss = "mse", metrics = ["mae"])
@@ -481,7 +484,7 @@ def process_batch(predictor, lowest_value, result, names, inputs):
 	for protein_name, vector in zip(names, predictions):
 		for output_index, score in enumerate(vector):
 			if score > lowest_value:  # todo : try with only take max on that, not every single one
-				score = min(round(score, 3),1.0)
+				score = min(round(score, 3), 1.0)
 				result.append([protein_name, all_terms[output_index], score])
 
 def get_nn_submission(test_fasta, test_taxonomy, ia):
