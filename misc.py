@@ -524,7 +524,13 @@ def produce_test_result(test_fasta, test_taxonomy, ia):
 	elif STRATEGY == "NN":
 		rows = get_nn_submission(test_fasta, test_taxonomy, ia)
 	submission = pd.DataFrame(rows, columns = ["EntryID", "term", "score"])
-	submission.to_csv("submission.tsv", header = False, sep = "\t", index = False)
+	submission.to_csv(
+		"submission.tsv",
+		header = False,
+		sep = "\t",
+		index = False,
+		float_format = "%.3f",
+	)
 	return submission
 
 ######

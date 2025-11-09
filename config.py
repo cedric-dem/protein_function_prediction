@@ -9,6 +9,6 @@ positions = ['A', "B", 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P
 # Dont know why but some have b, u,x
 
 BATCH_SIZE_TRAIN = 32
-N_EPOCHS = 3
+N_EPOCHS = 10
 
-BATCH_SIZE_TEST = 32
+BATCH_SIZE_TEST = 256
