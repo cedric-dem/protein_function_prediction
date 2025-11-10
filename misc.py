@@ -528,7 +528,7 @@ def produce_test_result(test_fasta, test_taxonomy, ia):
 		rows = get_nn_submission(test_fasta, test_taxonomy, ia)
 	submission = pd.DataFrame(rows, columns = ["EntryID", "term", "score"])
 	submission.to_csv(
-		"submission.tsv",
+		SUBMISSION_NAME,
 		header = False,
 		sep = "\t",
 		index = False,

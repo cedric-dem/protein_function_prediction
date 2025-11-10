@@ -1,6 +1,7 @@
-lowest_value = 0.1
+lowest_value = 0.05
 
-model_name = "model_v4.keras"
+model_name = "model_v7.keras"
+SUBMISSION_NAME = "model_v7.tsv"
 
 STRATEGY = "NN"
 HIDDEN_LAYER = 2000
