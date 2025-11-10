@@ -4,6 +4,7 @@ import random
 
 import pandas as pd
 from config import *
+import matplotlib.pyplot as plt
 from typing import Optional, Tuple
 import numpy as np
 import tensorflow as tf
@@ -360,7 +361,7 @@ def get_occurences_vector_from_matrix_1d(amino_acid_list):
 
 	return (matrix_occurences / 4100) ** (1 / EXPONENT_OCCURENCES)
 
-def get_occurences_vector_from_matrix_2d(amino_acid_list):
+def get_occurences_vector_from_matrix_2d(amino_acid_list, concatenate_to_list = True):
 	matrix_occurences = np.zeros((len(positions), len(positions)), dtype = np.float32)
 
 	for i in range(1, len(amino_acid_list)):
@@ -373,7 +374,10 @@ def get_occurences_vector_from_matrix_2d(amino_acid_list):
 		matrix_occurences[old_position, new_position] += 1
 	# todo try in percentage
 	# TODO try non linear like project 1 to 0.5, 10 to 0.9, 100 to 0.9999 etc
-	return ((matrix_occurences / 1300) ** (1 / EXPONENT_OCCURENCES)).reshape(-1)
+	if concatenate_to_list:
+		return ((matrix_occurences / 1300) ** (1 / EXPONENT_OCCURENCES)).reshape(-1)
+	else:
+		return matrix_occurences
 
 def get_occurences_vector_from_matrix_3d(amino_acid_list):
 	matrix_occurences = np.zeros((len(positions), len(positions), len(positions)), dtype = np.float32)
