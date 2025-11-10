@@ -407,7 +407,7 @@ def get_shaped_input(amino_acid_list):
 	size = len(amino_acid_list)  # todo split in size size_perentile, like 10 values, 1 at the proportion
 
 	# TODO : cubic root + clamp between  0 and 1
-	return np.concatenate((occurences_as_vector_1d, occurences_as_vector_2d, start, end, np.array([size / 36000.0], dtype = np.float32)))
+	return np.clip(np.concatenate((occurences_as_vector_1d, occurences_as_vector_2d, start, end, np.array([size / 36000.0], dtype = np.float32))), 0, 1)
 
 def get_shaped_output(raw_output):
 	result = np.zeros(len(all_terms), dtype = np.float32)
