@@ -358,7 +358,7 @@ def get_occurences_vector_from_matrix_1d(amino_acid_list):
 		new_position = positions.index(new_car)
 		matrix_occurences[new_position] += 1
 
-	return np.sqrt(matrix_occurences / 4100)
+	return (matrix_occurences / 4100) ** (1 / EXPONENT_OCCURENCES)
 
 def get_occurences_vector_from_matrix_2d(amino_acid_list):
 	matrix_occurences = np.zeros((len(positions), len(positions)), dtype = np.float32)
@@ -373,7 +373,7 @@ def get_occurences_vector_from_matrix_2d(amino_acid_list):
 		matrix_occurences[old_position, new_position] += 1
 	# todo try in percentage
 	# TODO try non linear like project 1 to 0.5, 10 to 0.9, 100 to 0.9999 etc
-	return np.sqrt(matrix_occurences / 1300).reshape(-1)
+	return ((matrix_occurences / 1300) ** (1 / EXPONENT_OCCURENCES)).reshape(-1)
 
 def get_occurences_vector_from_matrix_3d(amino_acid_list):
 	matrix_occurences = np.zeros((len(positions), len(positions), len(positions)), dtype = np.float32)
@@ -391,7 +391,7 @@ def get_occurences_vector_from_matrix_3d(amino_acid_list):
 
 	# todo try in percentage
 	# TODO try non linear like project 1 to 0.5, 10 to 0.9, 100 to 0.9999 etc
-	return np.sqrt(matrix_occurences / 1300).reshape(-1)
+	return ((matrix_occurences / 500) ** (1 / EXPONENT_OCCURENCES)).reshape(-1)
 
 def get_shaped_input(amino_acid_list):
 	occurences_as_vector_1d = get_occurences_vector_from_matrix_1d(amino_acid_list)
@@ -406,7 +406,7 @@ def get_shaped_input(amino_acid_list):
 
 	size = len(amino_acid_list)  # todo split in size size_perentile, like 10 values, 1 at the proportion
 
-	#TODO : cubic root + clamp between  0 and 1
+	# TODO : cubic root + clamp between  0 and 1
 	return np.concatenate((occurences_as_vector_1d, occurences_as_vector_2d, start, end, np.array([size / 36000.0], dtype = np.float32)))
 
 def get_shaped_output(raw_output):
