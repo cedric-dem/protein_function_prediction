@@ -350,7 +350,17 @@ class StreamingTrainingSequence(keras.utils.Sequence):
 			self._first_batch_cache = self._create_batch(first_indices)
 		return self._first_batch_cache
 
-def get_matrix_occurences(amino_acid_list):
+def get_occurences_vector_from_matrix_1d(amino_acid_list):
+	matrix_occurences = np.zeros((len(positions)), dtype = np.float32)
+
+	for i in range(len(amino_acid_list)):
+		new_car = amino_acid_list[i]
+		new_position = positions.index(new_car)
+		matrix_occurences[new_position] += 1
+
+	return np.sqrt(matrix_occurences / 4100)
+
+def get_occurences_vector_from_matrix_2d(amino_acid_list):
 	matrix_occurences = np.zeros((len(positions), len(positions)), dtype = np.float32)
 
 	for i in range(1, len(amino_acid_list)):
@@ -361,27 +371,43 @@ def get_matrix_occurences(amino_acid_list):
 		new_position = positions.index(new_car)
 
 		matrix_occurences[old_position, new_position] += 1
+	# todo try in percentage
+	# TODO try non linear like project 1 to 0.5, 10 to 0.9, 100 to 0.9999 etc
+	return np.sqrt(matrix_occurences / 1300).reshape(-1)
+
+def get_occurences_vector_from_matrix_3d(amino_acid_list):
+	matrix_occurences = np.zeros((len(positions), len(positions), len(positions)), dtype = np.float32)
+
+	for i in range(1, len(amino_acid_list) - 1):
+		old_car = amino_acid_list[i - 1]
+		new_car = amino_acid_list[i]
+		next_car = amino_acid_list[i]
+
+		old_position = positions.index(old_car)
+		new_position = positions.index(new_car)
+		next_position = positions.index(next_car)
+
+		matrix_occurences[old_position, new_position, next_position] += 1
 
 	# todo try in percentage
 	# TODO try non linear like project 1 to 0.5, 10 to 0.9, 100 to 0.9999 etc
-
-	# for line in matrix_occurences:
-	#	print(line)
-	return matrix_occurences
+	return np.sqrt(matrix_occurences / 1300).reshape(-1)
 
 def get_shaped_input(amino_acid_list):
-	matrix_occurences = get_matrix_occurences(amino_acid_list)
-	occurences_as_vector = np.sqrt(matrix_occurences / 1300).reshape(-1)
+	occurences_as_vector_1d = get_occurences_vector_from_matrix_1d(amino_acid_list)
+	occurences_as_vector_2d = get_occurences_vector_from_matrix_2d(amino_acid_list)
+	# occurences_as_vector_3d = get_occurences_vector_from_matrix_3d(amino_acid_list)
 
-	start = np.zeros(len(matrix_occurences), dtype = np.float32)
-	end = np.zeros(len(matrix_occurences), dtype = np.float32)
+	start = np.zeros(len(positions), dtype = np.float32)
+	end = np.zeros(len(positions), dtype = np.float32)
 
 	start[positions.index(amino_acid_list[0])] = 1
 	end[positions.index(amino_acid_list[1])] = 1
 
 	size = len(amino_acid_list)  # todo split in size size_perentile, like 10 values, 1 at the proportion
 
-	return np.concatenate((occurences_as_vector, start, end, np.array([size / 36000.0], dtype = np.float32)))
+	#TODO : cubic root + clamp between  0 and 1
+	return np.concatenate((occurences_as_vector_1d, occurences_as_vector_2d, start, end, np.array([size / 36000.0], dtype = np.float32)))
 
 def get_shaped_output(raw_output):
 	result = np.zeros(len(all_terms), dtype = np.float32)
@@ -425,7 +451,7 @@ def train_nn(dataset):
 
 	print('==> building model')
 	if HIDDEN_LAYER == None:
-		model = keras.Sequential([layers.Input(shape = (INPUT_SIZE,)), layers.Dense(OUTPUT_SIZE, activation = None)])
+		model = keras.Sequential([layers.Input(shape = (INPUT_SIZE,)), layers.Dense(OUTPUT_SIZE, activation = None, use_bias = True)])
 	else:
 		model = keras.Sequential([layers.Input(shape = (INPUT_SIZE,)), layers.Dense(HIDDEN_LAYER, activation = 'sigmoid'), layers.Dense(OUTPUT_SIZE, activation = None)])
 

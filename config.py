@@ -4,7 +4,7 @@ model_name = "model_v7.keras"
 SUBMISSION_NAME = "model_v7.tsv"
 
 STRATEGY = "NN"
-HIDDEN_LAYER = 2000
+HIDDEN_LAYER = None
 
 positions = ['A', "B", 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', "U", 'V', 'W', "X", 'Y', "Z"]
 # positions = ['A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W', 'Y']
