@@ -1,3 +1,4 @@
+import pickle
 import re
 from pathlib import Path
 import random
@@ -10,6 +11,17 @@ import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
+from sklearn.multioutput import MultiOutputRegressor
+import xgboost as xgb
+print(xgb.__version__)
+
+params = {
+    'tree_method': 'gpu_hist',
+    'predictor': 'gpu_predictor'
+}
+
+xgb_r = xgb.XGBRegressor(**params)
+print(xgb_r.get_params())
 
 def get_list_of_raw_terms():
 	complete_df = read_obo_file("Train/go-basic.obo")
@@ -436,13 +448,32 @@ def get_dataset(fasta, terms):
 	terms_as_dict = get_terms_as_dict(terms)
 	return StreamingTrainingSequence(fasta, terms_as_dict, BATCH_SIZE_TRAIN)
 
+def _collect_dataset_arrays(dataset):
+	inputs = []
+	outputs = []
+
+	for batch_idx in range(len(dataset)):
+		batch_inputs, batch_outputs = dataset[batch_idx]
+		inputs.append(batch_inputs)
+		outputs.append(batch_outputs)
+
+	if not inputs:
+		raise ValueError("Dataset did not yield any batches")
+
+	features = np.concatenate(inputs, axis = 0).astype(np.float32, copy = False)
+	labels = np.concatenate(outputs, axis = 0).astype(np.float32, copy = False)
+	return features, labels
+
 def train_model(go_basic, train_fasta, train_taxonomy, train_terms, ia):
 	dataset = get_dataset(train_fasta, train_terms)
 
 	# train_xnn_with_hidden_layer() #todo
-	# train_xgb() #todo
 	# knn also todo
-	train_nn(dataset)
+
+	if STRATEGY == "XGB":
+		train_xgb(dataset)
+	elif STRATEGY == "NN":
+		train_nn(dataset)
 
 def train_nn(dataset):
 	first_inputs, first_outputs = dataset.peek_batch()
@@ -466,7 +497,54 @@ def train_nn(dataset):
 	model.fit(dataset, epochs = N_EPOCHS, verbose = 1)
 
 	print('==> saving model')
-	model.save(model_name)
+	model.save(NN_MODEL_NAME)
+
+def train_xgb(dataset):
+	first_inputs, first_outputs = dataset.peek_batch()
+
+	input_size = first_inputs.shape[1]
+	output_size = first_outputs.shape[1]
+
+	print('==> XGBoost I/O Size :', input_size, '/', output_size)
+	print("==> Dataset size ", dataset.sample_count)
+
+	print('==> collecting dataset for XGBoost')
+	features, labels = _collect_dataset_arrays(dataset)
+
+	XGB_MAX_DEPTH = 2
+	XGB_LEARNING_RATE = 0.1
+	XGB_N_ESTIMATORS = 1
+	XGB_SUBSAMPLE = 0.3
+	XGB_COLSAMPLE = 0.3
+
+
+	base_regressor = xgb.XGBRegressor(
+		objective = 'reg:squarederror',
+		n_estimators = XGB_N_ESTIMATORS,
+		learning_rate = XGB_LEARNING_RATE,
+		max_depth = XGB_MAX_DEPTH,
+		subsample = XGB_SUBSAMPLE,
+		colsample_bytree = XGB_COLSAMPLE,
+		tree_method = 'gpu_hist',
+		n_jobs = -1,
+		predictor = 'gpu_predictor'
+	)
+
+	model = MultiOutputRegressor(base_regressor)
+
+	print('==> training XGBoost model')
+	model.fit(features, labels)
+
+	bundle = {
+		"model": model,
+		"input_size": input_size,
+		"output_size": output_size,
+		"terms": all_terms,
+	}
+
+	print('==> saving XGBoost model')
+	with open(XGB_MODEL_NAME, 'wb') as fp:
+		pickle.dump(bundle, fp)
 
 def get_random_submission(test_fasta, test_taxonomy, ia):
 	entry_names = test_fasta.get("protein_name")
@@ -505,7 +583,9 @@ def predict_output(predictor, formatted_input):
 	vector = np.asarray(formatted_input, dtype = np.float32)
 	if vector.ndim == 1:
 		vector = vector.reshape(1, -1)
-	return predictor.predict(vector, batch_size = 32)  # or predictor.predict_on_batch(vector)
+	if isinstance(predictor, keras.Model):
+		return predictor.predict(vector, batch_size = 32)  # or predictor.predict_on_batch(vector)
+	return predictor.predict(vector)
 
 def process_batch(predictor, lowest_value, result, names, inputs):
 	if not inputs:
@@ -519,7 +599,7 @@ def process_batch(predictor, lowest_value, result, names, inputs):
 
 def get_nn_submission(test_fasta, test_taxonomy, ia):
 	result = []
-	predictor = keras.models.load_model(model_name)
+	predictor = keras.models.load_model(NN_MODEL_NAME)
 
 	batch_inputs = []
 	batch_names = []
@@ -550,12 +630,67 @@ def get_nn_submission(test_fasta, test_taxonomy, ia):
 
 	return result
 
+def load_xgb_model():
+	with open(XGB_MODEL_NAME, 'rb') as fp:
+		bundle = pickle.load(fp)
+
+	if not isinstance(bundle, dict) or "model" not in bundle:
+		raise ValueError("Invalid XGBoost model bundle")
+
+	return bundle
+
+def get_xgb_submission(test_fasta, test_taxonomy, ia):
+	bundle = load_xgb_model()
+	predictor = bundle["model"]
+	expected_input = bundle.get("input_size")
+	if expected_input is None:
+		raise ValueError("XGBoost model is missing input size metadata")
+
+	result = []
+
+	batch_inputs = []
+	batch_names = []
+
+	total_rows = len(test_fasta)
+
+	display_every_percentage = 3
+
+	next_progress = display_every_percentage
+	for row_number, (index, row) in enumerate(test_fasta.iterrows(), start = 1):
+		this_protein_name = row["protein_name"]
+
+		this_sequence = row["sequence"]
+
+		formatted_input = get_shaped_input(this_sequence)
+		if formatted_input.shape[0] != expected_input:
+			raise ValueError(
+				f"Input size mismatch for XGBoost model: expected {expected_input}, got {formatted_input.shape[0]}"
+			)
+		batch_inputs.append(formatted_input)
+		batch_names.append(this_protein_name)
+		while total_rows and next_progress <= 100 and row_number * 100 >= next_progress * total_rows:
+			print(f"=========> Processed {row_number}/{total_rows} rows ({next_progress}%): index {index}")
+			next_progress += display_every_percentage
+
+		if len(batch_inputs) == BATCH_SIZE_TEST:
+			process_batch(predictor, lowest_value, result, batch_names, batch_inputs)
+			batch_inputs = []
+			batch_names = []
+
+	process_batch(predictor, lowest_value, result, batch_names, batch_inputs)
+
+	return result
+
 def produce_test_result(test_fasta, test_taxonomy, ia):
 	if STRATEGY == "RANDOM":
 		rows = get_random_submission(test_fasta, test_taxonomy, ia)
 
 	elif STRATEGY == "NN":
 		rows = get_nn_submission(test_fasta, test_taxonomy, ia)
+	elif STRATEGY == "XGB":
+		rows = get_xgb_submission(test_fasta, test_taxonomy, ia)
+	else:
+		raise ValueError(f"Unknown strategy '{STRATEGY}'")
 	submission = pd.DataFrame(rows, columns = ["EntryID", "term", "score"])
 	submission.to_csv(
 		SUBMISSION_NAME,

@@ -1,9 +1,11 @@
 lowest_value = 0.05
 
-model_name = "model_v7.keras"
+NN_MODEL_NAME = "model_v7.keras"
+XGB_MODEL_NAME = "model_v7_xgb.pkl"
+
 SUBMISSION_NAME = "model_v7.tsv"
 
-STRATEGY = "NN"
+STRATEGY = "XGB"
 HIDDEN_LAYER = None
 EXPONENT_OCCURENCES = 2 #TODO try with 3
 
