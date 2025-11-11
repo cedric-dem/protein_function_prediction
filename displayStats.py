@@ -1,41 +1,40 @@
 from misc import *
 
 def get_training_protein_list():
-	df = read_fasta_file("Train/train_sequences.fasta", False)
-	return df['sequence'].to_numpy()
+	training_df = read_fasta_file("Train/train_sequences.fasta", False)
+	return training_df['sequence'].to_numpy()
 
 def get_test_protein_list():
-	df = read_fasta_file("Test/testsuperset.fasta", True)
-	return df['sequence'].to_numpy()
+	test_df = read_fasta_file("Test/testsuperset.fasta", True)
+	return test_df['sequence'].to_numpy()
 
-def display_probability_each_amino_acid(l):
-	# 3 : prob prot starts with each aa, contains, and ends
+def display_probability_each_amino_acid(protein_list):
 	occurrences_total = np.zeros(len(positions))
 	occurrences_start = np.zeros(len(positions))
 	occurrences_end = np.zeros(len(positions))
 
 	total = 0
-	for i in range(len(l)):
-		occurrences_start[positions.index(l[i][0])] += 1
-		occurrences_end[positions.index(l[i][-1])] += 1
+	for current_protein_index in range(len(protein_list)):
+		occurrences_start[positions.index(protein_list[current_protein_index][0])] += 1
+		occurrences_end[positions.index(protein_list[current_protein_index][-1])] += 1
 
-		for j in range(len(l[i])):
-			index_in_positions = positions.index(l[i][j])
+		for j in range(len(protein_list[current_protein_index])):
+			index_in_positions = positions.index(protein_list[current_protein_index][j])
 			occurrences_total[index_in_positions] += 1
 			total += 1
 
 	print('====> Probabilities for each amino acid')
-	for i in range(len(positions)):
-		prob_total = round(100 * occurrences_total[i] / total, 2)
-		prob_start = round(100 * occurrences_start[i] / len(l), 2)
-		prob_end = round(100 * occurrences_end[i] / len(l), 2)
-		print("===> Amino acid  : ", positions[i], ":", prob_total, " %, start ", prob_start, " %, end ", prob_end, " %")
+	for current_position_index in range(len(positions)):
+		prob_total = round(100 * occurrences_total[current_position_index] / total, 2)
+		prob_start = round(100 * occurrences_start[current_position_index] / len(protein_list), 2)
+		prob_end = round(100 * occurrences_end[current_position_index] / len(protein_list), 2)
+		print("===> Amino acid  : ", positions[current_position_index], ":", prob_total, " %, start ", prob_start, " %, end ", prob_end, " %")
 
-def display_heatmap_amino_acid_couples(l):
+def display_heatmap_amino_acid_couples(protein_list):
 	total_occurrences = np.zeros((len(positions), len(positions)), dtype = np.float32)
 
-	for elem in l:
-		total_occurrences += get_occurences_vector_from_matrix_2d(elem, False)
+	for protein in protein_list:
+		total_occurrences += get_occurences_vector_from_matrix_2d(protein, False)
 
 	plt.xticks(ticks = np.arange(len(positions)), labels = positions, rotation = 45, ha = "right")
 	plt.yticks(ticks = np.arange(len(positions)), labels = positions)
@@ -45,22 +44,22 @@ def display_heatmap_amino_acid_couples(l):
 	plt.title("Heatmap pairs")
 	plt.show()
 
-def display_stats_chains_length(l):
-	lengths = []
-	for elem in l:
-		lengths.append(len(elem))
+def display_stats_chains_length(protein_list):
+	protein_length = []
+	for protein in protein_list:
+		protein_length.append(len(protein))
 
-	describe_list(lengths, "protein chain lengths")
+	describe_list(protein_length, "protein chain lengths")
 
 def get_proteins_functions_quantities():
-	x = read_terms("Train/train_terms.tsv")
-	dict_out = x['EntryID'].value_counts().to_dict()
+	df_train = read_terms("Train/train_terms.tsv")
+	function_quantity_per_protein = df_train['EntryID'].value_counts().to_dict()
 
-	result = []
-	for elem in dict_out:
-		result.append(dict_out[elem])
+	functions_quantity = []
+	for protein in function_quantity_per_protein:
+		functions_quantity.append(function_quantity_per_protein[protein])
 
-	return result
+	return functions_quantity
 
 def describe_list(l, name):
 	l.sort()
@@ -85,9 +84,9 @@ test_amino_acid_list = get_test_protein_list()
 
 all_amino_acids = np.concatenate((train_amino_acid_list, test_amino_acid_list))
 
-# display_probability_each_amino_acid(all_amino_acids)
-# display_heatmap_amino_acid_couples(all_amino_acids)
-# display_stats_chains_length(all_amino_acids)
+display_probability_each_amino_acid(all_amino_acids)
+display_heatmap_amino_acid_couples(all_amino_acids)
+display_stats_chains_length(all_amino_acids)
 
 lengths = get_proteins_functions_quantities()
 describe_list(lengths, "protein functions quantities")
