@@ -558,8 +558,9 @@ def train_knn(dataset):
 	print('==> collecting dataset for KNN')
 	features, labels = _collect_dataset_arrays(dataset)
 
-	KNN_N_NEIGHBORS = 5
+	KNN_N_NEIGHBORS = 3
 
+	print('==> create regressor')
 	base_regressor = KNeighborsRegressor(
 		n_neighbors = KNN_N_NEIGHBORS,
 		weights = 'distance',
@@ -651,10 +652,7 @@ def get_nn_submission(test_fasta, test_taxonomy, ia):
 		this_sequence = row["sequence"]
 
 		formatted_input = get_shaped_input(this_sequence)
-		if formatted_input.shape[0] != expected_input:
-			raise ValueError(
-				f"Input size mismatch for XGBoost model: expected {expected_input}, got {formatted_input.shape[0]}"
-			)
+
 		batch_inputs.append(formatted_input)
 		batch_names.append(this_protein_name)
 		while total_rows and next_progress <= 100 and row_number * 100 >= next_progress * total_rows:
@@ -676,6 +674,15 @@ def load_knn_model():
 
 	if not isinstance(bundle, dict) or "model" not in bundle:
 		raise ValueError("Invalid KNN model bundle")
+
+	return bundle
+
+def load_xgb_model():
+	with open(XGB_MODEL_NAME, 'rb') as fp:
+		bundle = pickle.load(fp)
+
+	if not isinstance(bundle, dict) or "model" not in bundle:
+		raise ValueError("Invalid XGBoost model bundle")
 
 	return bundle
 
@@ -720,6 +727,50 @@ def get_knn_submission(test_fasta, test_taxonomy, ia):
 	process_batch(predictor, lowest_value, result, batch_names, batch_inputs)
 
 	return result
+
+
+def get_xgb_submission(test_fasta, test_taxonomy, ia):
+	bundle = load_xgb_model()
+	predictor = bundle["model"]
+	expected_input = bundle.get("input_size")
+	if expected_input is None:
+		raise ValueError("XGBoost model is missing input size metadata")
+
+	result = []
+
+	batch_inputs = []
+	batch_names = []
+
+	total_rows = len(test_fasta)
+
+	display_every_percentage = 3
+
+	next_progress = display_every_percentage
+	for row_number, (index, row) in enumerate(test_fasta.iterrows(), start = 1):
+		this_protein_name = row["protein_name"]
+
+		this_sequence = row["sequence"]
+
+		formatted_input = get_shaped_input(this_sequence)
+		if formatted_input.shape[0] != expected_input:
+			raise ValueError(
+				f"Input size mismatch for XGBoost model: expected {expected_input}, got {formatted_input.shape[0]}"
+			)
+		batch_inputs.append(formatted_input)
+		batch_names.append(this_protein_name)
+		while total_rows and next_progress <= 100 and row_number * 100 >= next_progress * total_rows:
+			print(f"=========> Processed {row_number}/{total_rows} rows ({next_progress}%): index {index}")
+			next_progress += display_every_percentage
+
+		if len(batch_inputs) == BATCH_SIZE_TEST:
+			process_batch(predictor, lowest_value, result, batch_names, batch_inputs)
+			batch_inputs = []
+			batch_names = []
+
+	process_batch(predictor, lowest_value, result, batch_names, batch_inputs)
+
+	return result
+
 
 def produce_test_result(test_fasta, test_taxonomy, ia):
 	if STRATEGY == "RANDOM":
