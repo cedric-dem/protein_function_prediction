@@ -12,12 +12,14 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 from sklearn.multioutput import MultiOutputRegressor
+from sklearn.neighbors import KNeighborsRegressor
 import xgboost as xgb
+
 print(xgb.__version__)
 
 params = {
-    'tree_method': 'gpu_hist',
-    'predictor': 'gpu_predictor'
+	'tree_method': 'gpu_hist',
+	'predictor': 'gpu_predictor'
 }
 
 xgb_r = xgb.XGBRegressor(**params)
@@ -467,13 +469,12 @@ def _collect_dataset_arrays(dataset):
 def train_model(go_basic, train_fasta, train_taxonomy, train_terms, ia):
 	dataset = get_dataset(train_fasta, train_terms)
 
-	# train_xnn_with_hidden_layer() #todo
-	# knn also todo
-
 	if STRATEGY == "XGB":
 		train_xgb(dataset)
 	elif STRATEGY == "NN":
 		train_nn(dataset)
+	elif STRATEGY == "KNN":
+		train_knn(dataset)
 
 def train_nn(dataset):
 	first_inputs, first_outputs = dataset.peek_batch()
@@ -517,7 +518,6 @@ def train_xgb(dataset):
 	XGB_SUBSAMPLE = 0.3
 	XGB_COLSAMPLE = 0.3
 
-
 	base_regressor = xgb.XGBRegressor(
 		objective = 'reg:squarederror',
 		n_estimators = XGB_N_ESTIMATORS,
@@ -544,6 +544,42 @@ def train_xgb(dataset):
 
 	print('==> saving XGBoost model')
 	with open(XGB_MODEL_NAME, 'wb') as fp:
+		pickle.dump(bundle, fp)
+
+def train_knn(dataset):
+	first_inputs, first_outputs = dataset.peek_batch()
+
+	input_size = first_inputs.shape[1]
+	output_size = first_outputs.shape[1]
+
+	print('==> KNN I/O Size :', input_size, '/', output_size)
+	print("==> Dataset size ", dataset.sample_count)
+
+	print('==> collecting dataset for KNN')
+	features, labels = _collect_dataset_arrays(dataset)
+
+	KNN_N_NEIGHBORS = 5
+
+	base_regressor = KNeighborsRegressor(
+		n_neighbors = KNN_N_NEIGHBORS,
+		weights = 'distance',
+		n_jobs = -1,
+	)
+
+	model = MultiOutputRegressor(base_regressor, n_jobs = -1)
+
+	print('==> training KNN model')
+	model.fit(features, labels)
+
+	bundle = {
+		"model": model,
+		"input_size": input_size,
+		"output_size": output_size,
+		"terms": all_terms,
+	}
+
+	print('==> saving KNN model')
+	with open(KNN_MODEL_NAME, 'wb') as fp:
 		pickle.dump(bundle, fp)
 
 def get_random_submission(test_fasta, test_taxonomy, ia):
@@ -615,6 +651,10 @@ def get_nn_submission(test_fasta, test_taxonomy, ia):
 		this_sequence = row["sequence"]
 
 		formatted_input = get_shaped_input(this_sequence)
+		if formatted_input.shape[0] != expected_input:
+			raise ValueError(
+				f"Input size mismatch for XGBoost model: expected {expected_input}, got {formatted_input.shape[0]}"
+			)
 		batch_inputs.append(formatted_input)
 		batch_names.append(this_protein_name)
 		while total_rows and next_progress <= 100 and row_number * 100 >= next_progress * total_rows:
@@ -630,21 +670,21 @@ def get_nn_submission(test_fasta, test_taxonomy, ia):
 
 	return result
 
-def load_xgb_model():
-	with open(XGB_MODEL_NAME, 'rb') as fp:
+def load_knn_model():
+	with open(KNN_MODEL_NAME, 'rb') as fp:
 		bundle = pickle.load(fp)
 
 	if not isinstance(bundle, dict) or "model" not in bundle:
-		raise ValueError("Invalid XGBoost model bundle")
+		raise ValueError("Invalid KNN model bundle")
 
 	return bundle
 
-def get_xgb_submission(test_fasta, test_taxonomy, ia):
-	bundle = load_xgb_model()
+def get_knn_submission(test_fasta, test_taxonomy, ia):
+	bundle = load_knn_model()
 	predictor = bundle["model"]
 	expected_input = bundle.get("input_size")
 	if expected_input is None:
-		raise ValueError("XGBoost model is missing input size metadata")
+		raise ValueError("KNN model is missing input size metadata")
 
 	result = []
 
@@ -664,7 +704,7 @@ def get_xgb_submission(test_fasta, test_taxonomy, ia):
 		formatted_input = get_shaped_input(this_sequence)
 		if formatted_input.shape[0] != expected_input:
 			raise ValueError(
-				f"Input size mismatch for XGBoost model: expected {expected_input}, got {formatted_input.shape[0]}"
+				f"Input size mismatch for KNN model: expected {expected_input}, got {formatted_input.shape[0]}"
 			)
 		batch_inputs.append(formatted_input)
 		batch_names.append(this_protein_name)
@@ -689,6 +729,8 @@ def produce_test_result(test_fasta, test_taxonomy, ia):
 		rows = get_nn_submission(test_fasta, test_taxonomy, ia)
 	elif STRATEGY == "XGB":
 		rows = get_xgb_submission(test_fasta, test_taxonomy, ia)
+	elif STRATEGY == "KNN":
+		rows = get_knn_submission(test_fasta, test_taxonomy, ia)
 	else:
 		raise ValueError(f"Unknown strategy '{STRATEGY}'")
 	submission = pd.DataFrame(rows, columns = ["EntryID", "term", "score"])
