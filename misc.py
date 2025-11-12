@@ -6,7 +6,7 @@ import random
 import pandas as pd
 from config import *
 import matplotlib.pyplot as plt
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
@@ -24,6 +24,11 @@ params = {
 
 xgb_r = xgb.XGBRegressor(**params)
 print(xgb_r.get_params())
+
+PAD_TOKEN_INDEX = 0
+CHAR_TO_INDEX = {char: idx + 1 for idx, char in enumerate(positions)}
+UNKNOWN_TOKEN_INDEX = len(CHAR_TO_INDEX) + 1
+RNN_VOCAB_SIZE = UNKNOWN_TOKEN_INDEX + 1
 
 def get_list_of_raw_terms():
 	complete_df = read_obo_file("Train/go-basic.obo")
@@ -121,19 +126,19 @@ def read_fasta_file(file_path, only_species):
 		raise FileNotFoundError(f"FASTA not found: {file_path}")
 
 	header_re = re.compile(r"""
-        ^
-        >(?P<db>[^|]+)\|
-        (?P<accession>[^|]+)\|
-        (?P<entry_name>\S+)
-        \s*
-        (?P<rest>.*)
-        $
+	^
+	>(?P<db>[^|]+)\|
+	(?P<accession>[^|]+)\|
+	(?P<entry_name>\S+)
+	\s*
+	(?P<rest>.*)
+	$
     """, re.VERBOSE)
 
 	kv_re = re.compile(r"""
-        (?P<key>[A-Z]{2,})=
-        (?P<val>.*?)
-        (?=(?:\s[A-Z]{2,}=)|$)
+	(?P<key>[A-Z]{2,})=
+	(?P<val>.*?)
+	(?=(?:\s[A-Z]{2,}=)|$)
     """, re.VERBOSE)
 
 	records = []
@@ -266,6 +271,30 @@ def read_ia_file(path):
 	df = pd.read_csv(path, sep = '\t', header = None, names = ["term", "weight"], usecols = [0, 1])
 	return df
 
+def encode_sequence_for_rnn(sequence: str) -> np.ndarray:
+	if not isinstance(sequence, str):
+		return np.array([], dtype = np.int32)
+
+	cleaned_sequence = sequence.upper()
+	encoded = [CHAR_TO_INDEX.get(char, UNKNOWN_TOKEN_INDEX) for char in cleaned_sequence if char.strip()]
+
+	if not encoded:
+		return np.array([], dtype = np.int32)
+
+	return np.asarray(encoded, dtype = np.int32)
+
+def pad_encoded_sequences(sequences: List[np.ndarray]) -> np.ndarray:
+	if not sequences:
+		raise ValueError("No sequences provided for padding")
+
+	max_length = max(seq.shape[0] for seq in sequences)
+	padded = np.full((len(sequences), max_length), PAD_TOKEN_INDEX, dtype = np.int32)
+
+	for idx, seq in enumerate(sequences):
+		padded[idx, : seq.shape[0]] = seq
+
+	return padded
+
 class StreamingTrainingSequence(keras.utils.Sequence):
 	def __init__(self, fasta_df, terms_dict, batch_size):
 		self.fasta_df = fasta_df
@@ -291,10 +320,62 @@ class StreamingTrainingSequence(keras.utils.Sequence):
 			accession = row['accession']
 
 			if self._first_item_cache is None:
+				raise IndexError('Batch index out of range')
+
+		if batch_idx == 0 and self._first_batch_cache is not None:
+			return self._first_batch_cache
+
+		start = batch_idx * self.batch_size
+		end = min(start + self.batch_size, self.sample_count)
+		batch_indices = self.valid_indices[start:end]
+
+		batch = self._create_batch(batch_indices)
+
+		if batch_idx == 0:
+			self._first_batch_cache = batch
+
+		return batch
+
+	def on_epoch_end(self):
+		self._first_batch_cache = None
+
+	def peek_batch(self):
+		if self._first_batch_cache is None:
+			first_indices = self.valid_indices[: self.batch_size]
+			self._first_batch_cache = self._create_batch(first_indices)
+		return self._first_batch_cache
+
+class StreamingRNNTrainingSequence(keras.utils.Sequence):
+	def __init__(self, fasta_df, terms_dict, batch_size):
+		self.fasta_df = fasta_df
+		self.terms_dict = terms_dict
+		self.batch_size = batch_size
+
+		self.valid_indices: List[int] = []
+		self.sample_count = 0
+		self._first_item_cache: Optional[Tuple[np.ndarray, np.ndarray]] = None
+		self._first_index: Optional[int] = None
+		self._first_batch_cache: Optional[Tuple[np.ndarray, np.ndarray]] = None
+
+		print('====> Start retrieve of fasta for RNN')
+		total_rows = fasta_df.shape[0]
+		for position, (index, row) in enumerate(fasta_df.iterrows()):
+			if position % 2000 == 0:
+				print("======> position in current loop  ", position, "/", total_rows)
+
+			sequence = row['sequence']
+			if not isinstance(sequence, str) or len(sequence) < 1:
+				continue
+
+			accession = row['accession']
+			encoded_input = encode_sequence_for_rnn(sequence)
+			if encoded_input.size == 0:
+				continue
+
+			if self._first_item_cache is None:
 				terms_list = terms_dict.get(accession, [])
-				shaped_input = get_shaped_input(sequence)
 				shaped_output = get_shaped_output(terms_list)
-				self._first_item_cache = (shaped_input, shaped_output)
+				self._first_item_cache = (encoded_input, shaped_output)
 				self._first_index = index
 
 			self.valid_indices.append(index)
@@ -302,7 +383,7 @@ class StreamingTrainingSequence(keras.utils.Sequence):
 		self.sample_count = len(self.valid_indices)
 
 		if self.sample_count == 0:
-			raise ValueError("No valid training samples found in FASTA file")
+			raise ValueError("No valid training samples found in FASTA file for RNN strategy")
 
 	def __len__(self):
 		if self.sample_count == 0:
@@ -310,31 +391,33 @@ class StreamingTrainingSequence(keras.utils.Sequence):
 		return (self.sample_count + self.batch_size - 1) // self.batch_size
 
 	def _create_batch(self, batch_indices):
-		batch_inputs = []
-		batch_outputs = []
+		batch_inputs: List[np.ndarray] = []
+		batch_outputs: List[np.ndarray] = []
 
 		for idx in batch_indices:
 			if self._first_item_cache is not None and idx == self._first_index:
-				shaped_input, shaped_output = self._first_item_cache
+				encoded_input, shaped_output = self._first_item_cache
 			else:
 				row = self.fasta_df.loc[idx]
 				sequence = row['sequence']
 				accession = row['accession']
 
-				if not isinstance(sequence, str) or len(sequence) < 2:
+				if not isinstance(sequence, str) or len(sequence) < 1:
 					continue
 
 				terms_list = self.terms_dict.get(accession, [])
-				shaped_input = get_shaped_input(sequence)
+				encoded_input = encode_sequence_for_rnn(sequence)
+				if encoded_input.size == 0:
+					continue
 				shaped_output = get_shaped_output(terms_list)
 
-			batch_inputs.append(shaped_input)
+			batch_inputs.append(encoded_input)
 			batch_outputs.append(shaped_output)
 
 		if not batch_inputs:
-			raise ValueError("Encountered an empty batch during training generation")
+			raise ValueError("Encountered an empty batch during RNN training generation")
 
-		inputs = np.stack(batch_inputs).astype(np.float32, copy = False)
+		inputs = pad_encoded_sequences(batch_inputs)
 		outputs = np.stack(batch_outputs).astype(np.float32, copy = False)
 		return inputs, outputs
 
@@ -358,6 +441,10 @@ class StreamingTrainingSequence(keras.utils.Sequence):
 
 	def on_epoch_end(self):
 		self._first_batch_cache = None
+
+	@property
+	def vocab_size(self) -> int:
+		return RNN_VOCAB_SIZE
 
 	def peek_batch(self):
 		if self._first_batch_cache is None:
@@ -448,6 +535,8 @@ def get_terms_as_dict(terms):
 
 def get_dataset(fasta, terms):
 	terms_as_dict = get_terms_as_dict(terms)
+	if STRATEGY == "RNN":
+		return StreamingRNNTrainingSequence(fasta, terms_as_dict, BATCH_SIZE_TRAIN)
 	return StreamingTrainingSequence(fasta, terms_as_dict, BATCH_SIZE_TRAIN)
 
 def _collect_dataset_arrays(dataset):
@@ -473,6 +562,8 @@ def train_model(go_basic, train_fasta, train_taxonomy, train_terms, ia):
 		train_xgb(dataset)
 	elif STRATEGY == "NN":
 		train_nn(dataset)
+	elif STRATEGY == "RNN":
+		train_rnn(dataset)
 	elif STRATEGY == "KNN":
 		train_knn(dataset)
 
@@ -499,6 +590,40 @@ def train_nn(dataset):
 
 	print('==> saving model')
 	model.save(NN_MODEL_NAME)
+
+def train_rnn(dataset):
+	_, first_outputs = dataset.peek_batch()
+
+	output_size = first_outputs.shape[1]
+	vocab_size = dataset.vocab_size
+
+	print('==> RNN Output Size :', output_size)
+	print("==> Dataset size ", dataset.sample_count)
+
+	inputs = keras.Input(shape = (None,), dtype = 'int32')
+
+	RNN_EMBEDDING_DIM = 128
+	RNN_RECURRENT_UNITS = 128
+
+	x = layers.Embedding(vocab_size, RNN_EMBEDDING_DIM, mask_zero = True)(inputs)
+	x = layers.Bidirectional(layers.GRU(RNN_RECURRENT_UNITS))(x)
+
+	if HIDDEN_LAYER is None:
+		outputs = layers.Dense(output_size, activation = None)(x)
+	else:
+		x = layers.Dense(HIDDEN_LAYER, activation = 'relu')(x)
+		outputs = layers.Dense(output_size, activation = None)(x)
+
+	model = keras.Model(inputs = inputs, outputs = outputs)
+
+	print('==> compile RNN model')
+	model.compile(optimizer = keras.optimizers.Adam(learning_rate = 0.001), loss = "mse", metrics = ["mae"])
+
+	print('==> fitting RNN model')
+	model.fit(dataset, epochs = N_EPOCHS, verbose = 1)
+
+	print('==> saving RNN model')
+	model.save(RNN_MODEL_NAME)
 
 def train_xgb(dataset):
 	first_inputs, first_outputs = dataset.peek_batch()
@@ -617,11 +742,26 @@ def get_random_submission(test_fasta, test_taxonomy, ia):
 	return rows
 
 def predict_output(predictor, formatted_input):
+	if isinstance(predictor, keras.Model):
+		model_inputs = getattr(predictor, "inputs", None)
+		input_dtype = None
+		if model_inputs:
+			input_dtype = model_inputs[0].dtype
+
+		if input_dtype is not None:
+			np_dtype = tf.as_dtype(input_dtype).as_numpy_dtype
+			vector = np.asarray(formatted_input, dtype = np_dtype)
+		else:
+			vector = np.asarray(formatted_input)
+
+		if vector.ndim == 1:
+			vector = np.expand_dims(vector, axis = 0)
+
+		return predictor.predict(vector, batch_size = 32)
+
 	vector = np.asarray(formatted_input, dtype = np.float32)
 	if vector.ndim == 1:
 		vector = vector.reshape(1, -1)
-	if isinstance(predictor, keras.Model):
-		return predictor.predict(vector, batch_size = 32)  # or predictor.predict_on_batch(vector)
 	return predictor.predict(vector)
 
 def process_batch(predictor, lowest_value, result, names, inputs):
@@ -668,6 +808,45 @@ def get_nn_submission(test_fasta, test_taxonomy, ia):
 
 	return result
 
+def get_rnn_submission(test_fasta, test_taxonomy, ia):
+	result = []
+	predictor = keras.models.load_model(RNN_MODEL_NAME)
+
+	batch_inputs: List[np.ndarray] = []
+	batch_names: List[str] = []
+
+	total_rows = len(test_fasta)
+
+	display_every_percentage = 3
+
+	next_progress = display_every_percentage
+	for row_number, (index, row) in enumerate(test_fasta.iterrows(), start = 1):
+		this_protein_name = row["protein_name"]
+
+		this_sequence = row["sequence"]
+
+		encoded_sequence = encode_sequence_for_rnn(this_sequence)
+		if encoded_sequence.size == 0:
+			continue
+
+		batch_inputs.append(encoded_sequence)
+		batch_names.append(this_protein_name)
+		while total_rows and next_progress <= 100 and row_number * 100 >= next_progress * total_rows:
+			print(f"=========> Processed {row_number}/{total_rows} rows ({next_progress}%): index {index}")
+			next_progress += display_every_percentage
+
+		if len(batch_inputs) == BATCH_SIZE_TEST:
+			padded_inputs = pad_encoded_sequences(batch_inputs)
+			process_batch(predictor, lowest_value, result, batch_names, padded_inputs)
+			batch_inputs = []
+			batch_names = []
+
+	if batch_inputs:
+		padded_inputs = pad_encoded_sequences(batch_inputs)
+		process_batch(predictor, lowest_value, result, batch_names, padded_inputs)
+
+	return result
+
 def load_knn_model():
 	with open(KNN_MODEL_NAME, 'rb') as fp:
 		bundle = pickle.load(fp)
@@ -693,26 +872,7 @@ def get_knn_submission(test_fasta, test_taxonomy, ia):
 	if expected_input is None:
 		raise ValueError("KNN model is missing input size metadata")
 
-	result = []
-
-	batch_inputs = []
-	batch_names = []
-
-	total_rows = len(test_fasta)
-
-	display_every_percentage = 3
-
-	next_progress = display_every_percentage
-	for row_number, (index, row) in enumerate(test_fasta.iterrows(), start = 1):
-		this_protein_name = row["protein_name"]
-
-		this_sequence = row["sequence"]
-
-		formatted_input = get_shaped_input(this_sequence)
-		if formatted_input.shape[0] != expected_input:
-			raise ValueError(
-				f"Input size mismatch for KNN model: expected {expected_input}, got {formatted_input.shape[0]}"
-			)
+		raise ValueError(f"Input size mismatch for XGBoost model: expected {expected_input}, got {formatted_input.shape[0]}")
 		batch_inputs.append(formatted_input)
 		batch_names.append(this_protein_name)
 		while total_rows and next_progress <= 100 and row_number * 100 >= next_progress * total_rows:
@@ -727,50 +887,6 @@ def get_knn_submission(test_fasta, test_taxonomy, ia):
 	process_batch(predictor, lowest_value, result, batch_names, batch_inputs)
 
 	return result
-
-
-def get_xgb_submission(test_fasta, test_taxonomy, ia):
-	bundle = load_xgb_model()
-	predictor = bundle["model"]
-	expected_input = bundle.get("input_size")
-	if expected_input is None:
-		raise ValueError("XGBoost model is missing input size metadata")
-
-	result = []
-
-	batch_inputs = []
-	batch_names = []
-
-	total_rows = len(test_fasta)
-
-	display_every_percentage = 3
-
-	next_progress = display_every_percentage
-	for row_number, (index, row) in enumerate(test_fasta.iterrows(), start = 1):
-		this_protein_name = row["protein_name"]
-
-		this_sequence = row["sequence"]
-
-		formatted_input = get_shaped_input(this_sequence)
-		if formatted_input.shape[0] != expected_input:
-			raise ValueError(
-				f"Input size mismatch for XGBoost model: expected {expected_input}, got {formatted_input.shape[0]}"
-			)
-		batch_inputs.append(formatted_input)
-		batch_names.append(this_protein_name)
-		while total_rows and next_progress <= 100 and row_number * 100 >= next_progress * total_rows:
-			print(f"=========> Processed {row_number}/{total_rows} rows ({next_progress}%): index {index}")
-			next_progress += display_every_percentage
-
-		if len(batch_inputs) == BATCH_SIZE_TEST:
-			process_batch(predictor, lowest_value, result, batch_names, batch_inputs)
-			batch_inputs = []
-			batch_names = []
-
-	process_batch(predictor, lowest_value, result, batch_names, batch_inputs)
-
-	return result
-
 
 def produce_test_result(test_fasta, test_taxonomy, ia):
 	if STRATEGY == "RANDOM":
@@ -778,6 +894,8 @@ def produce_test_result(test_fasta, test_taxonomy, ia):
 
 	elif STRATEGY == "NN":
 		rows = get_nn_submission(test_fasta, test_taxonomy, ia)
+	elif STRATEGY == "RNN":
+		rows = get_rnn_submission(test_fasta, test_taxonomy, ia)
 	elif STRATEGY == "XGB":
 		rows = get_xgb_submission(test_fasta, test_taxonomy, ia)
 	elif STRATEGY == "KNN":

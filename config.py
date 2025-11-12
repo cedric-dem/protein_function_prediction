@@ -3,11 +3,12 @@ lowest_value = 0.05
 NN_MODEL_NAME = "model_v7.keras"
 XGB_MODEL_NAME = "model_v7_xgb.pkl"
 KNN_MODEL_NAME = "model_v7_knn.pkl"
+RNN_MODEL_NAME = "model_v7_rnn.keras"
 
 SUBMISSION_NAME = "model_v7.tsv"
 
-STRATEGY = "NN"
-HIDDEN_LAYER = 2000
+STRATEGY = "RNN"
+HIDDEN_LAYER = None
 EXPONENT_OCCURENCES =  3
 
 positions = ['A', "B", 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', "U", 'V', 'W', "X", 'Y', "Z"]
